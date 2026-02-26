@@ -50,6 +50,8 @@ export interface FreedomVideoParams {
   aspectRatio?: string;
   duration?: number;
   resolution?: string;
+  enhancePrompt?: boolean;
+  enableUpsample?: boolean;
   uploadFiles?: FreedomVideoUploadFile[];
 }
 
@@ -63,8 +65,11 @@ export interface GenerationResult {
 
 const IMAGE_POLL_INTERVAL = 2000;
 const IMAGE_POLL_MAX_ATTEMPTS = 60;
-const VIDEO_POLL_INTERVAL = 2000;
-const VIDEO_POLL_MAX_ATTEMPTS = 120;
+// Default video polling timeout: 15 minutes (5s * 180 attempts)
+const VIDEO_POLL_INTERVAL = 5000;
+const VIDEO_POLL_MAX_ATTEMPTS = 180;
+const VIDEO_COMPLETED_URL_RETRY_ATTEMPTS = 3;
+const VIDEO_COMPLETED_URL_RETRY_INTERVAL = 2000;
 
 // Retry config
 const RETRY_MAX_ATTEMPTS = 3;
@@ -228,8 +233,8 @@ function detectFreedomImageRoute(model: string, endpointTypes?: string[]): Freed
     return 'kling_image';
   }
 
-  // Replicate: endpoint type uses '{org}/{model}异步' pattern (contains '/' before '异步')
-  if ((endpointTypes || []).some(t => t.includes('/') && t.endsWith('异步'))) {
+  // Replicate: endpoint type commonly looks like '{org}/{model}'
+  if ((endpointTypes || []).some(t => /^[a-z0-9._-]+\/[a-z0-9._-]+$/i.test(t))) {
     return 'replicate';
   }
 
@@ -240,63 +245,72 @@ function detectFreedomImageRoute(model: string, endpointTypes?: string[]): Freed
 type FreedomVideoRoute = 'openai_official' | 'unified' | 'volc' | 'wan' | 'kling' | 'replicate';
 
 const FREEDOM_VIDEO_ROUTE_MAP: Record<string, FreedomVideoRoute> = {
-  'openAI官方视频格式': 'openai_official',
-  'openAI视频格式': 'openai_official',
-  '豆包视频异步': 'volc',  // doubao-seedance uses /volc/v1/contents/generations/tasks
-  '异步': 'wan',
-  '文生视频': 'kling',
-  '图生视频': 'kling',
-  '视频延长': 'kling',
-  'omni-video': 'kling',
-  '动作控制': 'kling',
-  '多模态视频编辑': 'kling',
-  '数字人': 'kling',
-  '对口型': 'kling',
-  '视频特效': 'kling',
-  '视频统一格式': 'unified',
-  'grok视频': 'unified',
   'openai-response': 'unified',
-  '海螺视频生成': 'unified',
-  'luma视频生成': 'unified',
-  'luma视频扩展': 'unified',
-  'runway图生视频': 'unified',
+  'omni-video': 'kling',
   'aigc-video': 'unified',
-  'wan视频生成': 'unified',  // wan2.6 models use memefast /v1/video/generations
-  // Vidu endpoint types (all route to unified /v1/video/generations)
-  'vidu文生视频': 'unified',
-  'vidu图生视频': 'unified',
-  'vidu参考生视频': 'unified',
-  'vidu首尾帧': 'unified',
-  'luma视频延长': 'unified',  // luma extend uses 延长 (file 04 naming)
 };
+
+function inferFreedomVideoRouteFromEndpointType(endpointTypeRaw: string): FreedomVideoRoute | null {
+  const endpointType = endpointTypeRaw.trim().toLowerCase();
+  if (!endpointType) return null;
+
+  const direct = FREEDOM_VIDEO_ROUTE_MAP[endpointType];
+  if (direct) return direct;
+
+  if (endpointType.includes('sora') || endpointType.includes('/v1/videos')) return 'openai_official';
+  if (endpointType.includes('openai') && endpointType.includes('video')) return 'openai_official';
+
+  if (endpointType.includes('kling') || endpointType.includes('omni-video')) return 'kling';
+
+  if (
+    endpointType.includes('seedance') ||
+    endpointType.includes('doubao') ||
+    endpointType.includes('/volc/') ||
+    endpointType.includes('volc')
+  ) {
+    return 'volc';
+  }
+
+  if (endpointType.includes('wan') || endpointType.includes('bailian') || endpointType.includes('/ali/')) {
+    return 'wan';
+  }
+
+  if (endpointType.includes('replicate') || /^[a-z0-9._-]+\/[a-z0-9._-]+$/i.test(endpointType)) {
+    return 'replicate';
+  }
+
+  if (
+    endpointType.includes('video/generations') ||
+    endpointType.includes('/v1/video') ||
+    endpointType.includes('grok') ||
+    endpointType.includes('luma') ||
+    endpointType.includes('runway') ||
+    endpointType.includes('vidu')
+  ) {
+    return 'unified';
+  }
+
+  return null;
+}
 
 function detectFreedomVideoRoute(model: string, endpointTypes?: string[]): FreedomVideoRoute {
   if (endpointTypes && endpointTypes.length > 0) {
-    // 优先级：官方 Sora -> Kling -> Volc -> Wan -> Replicate -> Unified
-    for (const t of endpointTypes) {
-      if (FREEDOM_VIDEO_ROUTE_MAP[t] === 'openai_official') return 'openai_official';
-    }
-    for (const t of endpointTypes) {
-      if (FREEDOM_VIDEO_ROUTE_MAP[t] === 'kling') return 'kling';
-    }
-    for (const t of endpointTypes) {
-      if (FREEDOM_VIDEO_ROUTE_MAP[t] === 'volc') return 'volc';
-    }
-    for (const t of endpointTypes) {
-      if (FREEDOM_VIDEO_ROUTE_MAP[t] === 'wan') return 'wan';
-    }
-    // Replicate: endpoint type uses '{org}/{model}异步' pattern (contains '/' before '异步')
-    if (endpointTypes.some(t => t.includes('/') && t.endsWith('异步'))) return 'replicate';
-    for (const t of endpointTypes) {
-      if (FREEDOM_VIDEO_ROUTE_MAP[t] === 'unified') return 'unified';
+    const formats = endpointTypes
+      .map(t => inferFreedomVideoRouteFromEndpointType(t))
+      .filter((f): f is FreedomVideoRoute => f !== null);
+
+    const priority: FreedomVideoRoute[] = ['openai_official', 'kling', 'volc', 'wan', 'replicate', 'unified'];
+    for (const format of priority) {
+      if (formats.includes(format)) return format;
     }
   }
 
   const m = model.toLowerCase();
-  if (m.includes('sora-2')) return 'openai_official';
+  if (m.includes('sora-2') || m.includes('openai')) return 'openai_official';
   if (m.includes('kling')) return 'kling';
-  // doubao-seedance routes via '豆包视频异步' endpoint type → volc (/volc/v1/contents/generations/tasks)
+  if (m.includes('seedance') || m.includes('doubao')) return 'volc';
   if (m.includes('wan')) return 'wan';
+  if (m.includes('replicate')) return 'replicate';
   return 'unified';
 }
 
@@ -897,7 +911,7 @@ function toSoraSize(aspectRatio?: string, resolution?: string): string {
 
 function toVeoOpenAIVideoSize(aspectRatio?: string): string {
   const isPortrait = aspectRatio === '9:16' || aspectRatio === '3:4';
-  return isPortrait ? '1080x1920' : '1920x1080';
+  return isPortrait ? '9x16' : '16x9';
 }
 
 function groupVideoUploadFiles(uploadFiles?: FreedomVideoUploadFile[]) {
@@ -939,46 +953,50 @@ function validateVeoVideoUploads(
   if (!capability.isVeo) return grouped;
 
   if (capability.mode === 'none') {
-    if (total > 0) throw new Error(`模型 ${model} 不支持上传文件输入`);
+    if (total > 0) {
+      throw new Error(
+        `${model} does not support reference images on this endpoint. Remove uploaded images or switch to a frame/components model.`,
+      );
+    }
     return grouped;
   }
 
   if (capability.mode === 'single') {
     const file = grouped.single || grouped.first;
     if (capability.minFiles > 0 && !file) {
-      throw new Error(`模型 ${model} 需要上传 1 张图片`);
+      throw new Error(`${model} requires one start frame image.`);
     }
     if (grouped.references.length > 0 || !!grouped.last || (!!grouped.single && !!grouped.first)) {
-      throw new Error(`模型 ${model} 仅支持 1 张图片输入`);
+      throw new Error(`${model} accepts exactly one start frame image. Do not send last/reference images.`);
     }
     return grouped;
   }
 
   if (capability.mode === 'first_last') {
     if (grouped.references.length > 0 || !!grouped.single) {
-      throw new Error(`模型 ${model} 仅支持首帧/尾帧输入`);
+      throw new Error(`${model} accepts first/last frame fields only. Use role=first and optional role=last.`);
     }
     if (capability.minFiles > 0 && !grouped.first) {
-      throw new Error(`模型 ${model} 需要上传首帧图片`);
+      throw new Error(`${model} requires a first frame image.`);
     }
     if (!grouped.first && grouped.last) {
-      throw new Error(`模型 ${model} 仅上传尾帧无效，请先上传首帧`);
+      throw new Error(`${model} cannot use a last frame without a first frame.`);
     }
     if (total > capability.maxFiles) {
-      throw new Error(`模型 ${model} 最多支持 2 张图片（首帧/尾帧）`);
+      throw new Error(`${model} supports up to ${capability.maxFiles} frame images.`);
     }
     return grouped;
   }
 
   if (capability.mode === 'multi') {
     if (!!grouped.single || !!grouped.first || !!grouped.last) {
-      throw new Error(`模型 ${model} 仅支持多参考图输入`);
+      throw new Error(`${model} components mode accepts only role=reference images.`);
     }
     if (grouped.references.length < capability.minFiles) {
-      throw new Error(`模型 ${model} 至少需要上传 1 张参考图`);
+      throw new Error(`${model} requires at least ${capability.minFiles} reference image(s).`);
     }
     if (grouped.references.length > capability.maxFiles) {
-      throw new Error(`模型 ${model} 最多支持 ${capability.maxFiles} 张参考图`);
+      throw new Error(`${model} supports up to ${capability.maxFiles} reference image(s).`);
     }
     return grouped;
   }
@@ -993,7 +1011,7 @@ async function toUploadHttpUrl(file: FreedomVideoUploadFile): Promise<string> {
 
 function dataUrlToBlob(dataUrl: string, mimeHint?: string): Blob {
   const match = dataUrl.match(/^data:(.*?);base64,(.*)$/);
-  if (!match) throw new Error('上传文件格式无效，必须是 data URL 或 http(s) URL');
+  if (!match) throw new Error('Invalid image input. Expected a base64 data URL.');
   const mime = match[1] || mimeHint || 'image/png';
   const b64 = match[2];
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
@@ -1003,7 +1021,7 @@ function dataUrlToBlob(dataUrl: string, mimeHint?: string): Blob {
 async function toUploadBlob(file: FreedomVideoUploadFile): Promise<Blob> {
   if (/^https?:\/\//i.test(file.dataUrl)) {
     const resp = await fetch(file.dataUrl);
-    if (!resp.ok) throw new Error(`无法下载上传素材：${resp.status}`);
+    if (!resp.ok) throw new Error(`Failed to download reference image: ${resp.status}`);
     return resp.blob();
   }
   return dataUrlToBlob(file.dataUrl, file.mimeType);
@@ -1049,29 +1067,27 @@ async function buildVeoUnifiedVideoBody(
   const body: Record<string, any> = {
     model,
     prompt: params.prompt,
+    enhance_prompt: params.enhancePrompt ?? true,
+    enable_upsample: params.enableUpsample ?? true,
   };
-  const metadata: Record<string, any> = {};
 
-  if (params.duration) body.duration = params.duration;
-  if (params.aspectRatio) metadata.aspectRatio = params.aspectRatio;
-  if (params.resolution) metadata.resolution = params.resolution.toLowerCase();
+  if (params.aspectRatio) body.aspect_ratio = params.aspectRatio;
 
+  const images: string[] = [];
   if (capability.mode === 'single') {
     const single = grouped.single || grouped.first;
-    if (single) body.image = await toUploadHttpUrl(single);
+    if (single) images.push(await toUploadHttpUrl(single));
   } else if (capability.mode === 'first_last') {
-    if (grouped.first) body.image = await toUploadHttpUrl(grouped.first);
-    if (grouped.last) {
-      metadata.lastFrame = { url: await toUploadHttpUrl(grouped.last) };
-    }
+    if (grouped.first) images.push(await toUploadHttpUrl(grouped.first));
+    if (grouped.last) images.push(await toUploadHttpUrl(grouped.last));
   } else if (capability.mode === 'multi') {
     const refs = grouped.references.slice(0, capability.maxFiles);
-    metadata.referenceImages = await Promise.all(
-      refs.map(async (f) => ({ url: await toUploadHttpUrl(f) })),
-    );
+    for (const ref of refs) {
+      images.push(await toUploadHttpUrl(ref));
+    }
   }
 
-  if (Object.keys(metadata).length > 0) body.metadata = metadata;
+  if (images.length > 0) body.images = images;
   return body;
 }
 
@@ -1174,7 +1190,7 @@ async function generateVideoViaUnified(
     if (grouped.last) {
       metadata.image_end = await toUploadHttpUrl(grouped.last);
     }
-    // Reference images: vidu参考生视频 and similar models
+    // Reference images: vidu闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁撻悩鍐蹭画闂侀潧顦弲娑氬閻熸噴褰掓偐瀹割喖鍓伴梺缁樺笒閻忔岸濡甸崟顖氱闁糕剝銇炴竟鏇㈡⒒娴ｅ憡鎲搁柛鐘茬Ч瀹曪繝宕樺顔兼濡炪倖鍔х粻鎴犵不婵犳碍鐓犻柟闂寸劍濞懷囨煛鐎ｎ亜鈧灝顫忛搹鐟板闁哄洨鍋涢埛澶嬬箾閹惧顣叉い銊ワ工椤?and similar models
     if (grouped.references.length > 0) {
       metadata.reference_images = await Promise.all(
         grouped.references.map(async (f) => ({ url: await toUploadHttpUrl(f) }))
@@ -1219,7 +1235,7 @@ async function generateVideoViaUnified(
   const taskId = submitData.task_id || submitData.id || submitData.request_id;
   const directUrl = extractVideoUrl(submitData);
   if (directUrl) return { url: directUrl, taskId: taskId ? String(taskId) : undefined };
-  if (!taskId) throw new Error('统一视频接口返回空任务 ID');
+  if (!taskId) throw new Error('缂傚倸鍊搁崐鎼佸磹閹间礁纾归柣鎴ｅГ閸ゅ嫰鏌涢锝嗙缂佹劖顨堥埀顒€绠嶉崕鍗灻洪妸鈺佺婵鍩栭崐鐢告⒒閸喓鈯曢柛鐔哄仱閺屾盯鎮╅崣澶樻＆闂佸搫鏈惄顖炲春閸曨垰绀冪憸蹇曟崲娓氣偓濮婃椽宕崟顒夋闂佺娴烽弫璇差嚕婵犳碍鍋勯柣鎾虫捣閻ｆ娊姊洪崷顓炲妺闁搞劌鐏氶幈銊︽償閵婏箑浠┑鐘诧工閹冲酣銆傞懖鈺冪＜閻庯綆鍋勭粭鎺撱亜椤撶偞澶勭紒缁樼箓椤繈顢楁笟鍥棨闂傚倷绀佸﹢閬嶁€﹂崼婢濆綊鎮滈崜鍨喘婵＄柉顦寸痪鎹愭闇夐柨婵嗘噺閹叉悂鏌ｉ幒妤佹暠濞ｅ洤锕ら—鍐偂鎼粹槅娼庢俊銈囧Х閸嬬偤宕归幐搴㈠弿闁逞屽墴閺屾洟宕煎┑鍥ф濡?ID');
 
   const pollUrls = [
     buildEndpoint(baseUrl, `video/generations/${taskId}`),
@@ -1234,18 +1250,28 @@ async function generateVideoViaUnified(
       });
       if (!pollResp.ok) continue;
       const pollData = await pollResp.json();
-      const status = String(pollData.status || pollData.state || pollData.data?.status || '').toLowerCase();
+      const status = getVideoTaskStatus(pollData);
       if (status === 'completed' || status === 'succeeded' || status === 'success') {
-        const videoUrl = extractVideoUrl(pollData);
+        let videoUrl = extractVideoUrl(pollData);
+        if (!videoUrl) {
+          videoUrl = await refetchVideoUrlAfterCompletion(async () => {
+            const followResp = await fetch(pollUrl, {
+              headers: { 'Authorization': `Bearer ${apiKey}` },
+            });
+            if (!followResp.ok) return null;
+            return followResp.json();
+          });
+        }
         if (videoUrl) return { url: videoUrl, taskId: String(taskId) };
+        continue;
       }
       if (status === 'failed' || status === 'error' || status === 'cancelled') {
-        throw new Error(pollData.error?.message || pollData.error || pollData.message || '视频生成失败');
+        throw new Error(getVideoTaskErrorMessage(pollData, 'Video generation failed.'));
       }
     }
   }
 
-  throw new Error('视频生成超时');
+  throw new Error('Unified video generation timed out before completion.');
 }
 
 async function generateVideoViaVolc(
@@ -1548,7 +1574,65 @@ function extractVideoUrl(data: any): string | null {
   if (Array.isArray(data.output) && typeof data.output[0] === 'string') return data.output[0];
   if (data.outputs?.[0]) return data.outputs[0];
   if (data.video_url) return data.video_url;
+  if (data.detail?.video_url) return data.detail.video_url;
+  if (data.detail?.upsample_video_url) return data.detail.upsample_video_url;
+  if (data.detail?.output?.video_url) return data.detail.output.video_url;
   if (data.response?.url) return data.response.url;  // doubao, jimeng, grok, wan2.6
+  return null;
+}
+
+function getVideoTaskStatus(data: any): string {
+  return String(
+    data?.status ??
+      data?.detail?.status ??
+      data?.state ??
+      data?.detail?.state ??
+      data?.data?.status ??
+      '',
+  ).toLowerCase();
+}
+
+function getVideoTaskErrorMessage(data: any, fallback: string = 'Video generation failed.'): string {
+  const candidates = [
+    data?.error?.message,
+    data?.error,
+    data?.message,
+    data?.error_message,
+    data?.detail?.error?.message,
+    data?.detail?.error,
+    data?.detail?.message,
+    data?.detail?.error_message,
+    data?.detail?.video_generation_error,
+  ];
+
+  for (const item of candidates) {
+    if (typeof item === 'string' && item.trim()) return item;
+    if (item && typeof item === 'object') return JSON.stringify(item);
+  }
+
+  return fallback;
+}
+
+async function refetchVideoUrlAfterCompletion(
+  requestStatus: () => Promise<any>,
+): Promise<string | null> {
+  for (let i = 0; i < VIDEO_COMPLETED_URL_RETRY_ATTEMPTS; i++) {
+    await new Promise((resolve) => setTimeout(resolve, VIDEO_COMPLETED_URL_RETRY_INTERVAL));
+    try {
+      const data = await requestStatus();
+      if (!data) continue;
+
+      const videoUrl = extractVideoUrl(data);
+      if (videoUrl) return videoUrl;
+
+      const status = getVideoTaskStatus(data);
+      if (status === 'failed' || status === 'error' || status === 'cancelled') {
+        throw new Error(getVideoTaskErrorMessage(data));
+      }
+    } catch (error) {
+      if (error instanceof Error) throw error;
+    }
+  }
   return null;
 }
 
@@ -1569,7 +1653,7 @@ async function pollForResult(
       if (!response.ok) continue;
 
       const data = await response.json();
-      const status = (data.status || data.state || '').toLowerCase();
+      const status = getVideoTaskStatus(data);
 
       // Check completion - triple status normalization from Higgsfield
       if (status === 'completed' || status === 'succeeded' || status === 'success') {
@@ -1578,7 +1662,7 @@ async function pollForResult(
 
       // Check failure
       if (status === 'failed' || status === 'error' || status === 'cancelled') {
-        throw new Error(`Generation failed: ${data.error || data.message || status}`);
+        throw new Error(`Generation failed: ${getVideoTaskErrorMessage(data, status)}`);
       }
 
       // Still processing

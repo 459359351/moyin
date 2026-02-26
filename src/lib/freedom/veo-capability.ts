@@ -37,10 +37,25 @@ export function isVeoModel(model: string): boolean {
 
 function resolveVeoEndpointFamily(endpointTypes?: string[]): VeoEndpointFamily {
   if (!endpointTypes || endpointTypes.length === 0) return 'unknown';
-  if (endpointTypes.includes('openAI视频格式') || endpointTypes.includes('openAI官方视频格式')) {
+
+  const normalized = endpointTypes.map(t => t.toLowerCase());
+
+  if (
+    normalized.some(t => t.includes('/v1/videos')) ||
+    normalized.some(t => t.includes('sora')) ||
+    normalized.some(t => t.includes('openai') && t.includes('video'))
+  ) {
     return 'openai_videos';
   }
-  if (endpointTypes.includes('视频统一格式')) return 'unified';
+
+  if (
+    normalized.some(t => t.includes('openai-response')) ||
+    normalized.some(t => t.includes('/v1/video')) ||
+    normalized.some(t => t.includes('video/generations'))
+  ) {
+    return 'unified';
+  }
+
   return 'unknown';
 }
 
@@ -56,6 +71,8 @@ export function resolveVeoUploadCapability(
   const isFrames = lower.includes('frames');
   const isVeo2Frames = lower.includes('veo2') && isFrames;
   const isOpenAIFast4K = /^veo_3_1-fast-4k$/i.test(model);
+  // veo3.1 / veo_3_1 families support optional first/last frame inputs (adaptive i2v/t2v).
+  const isVeo31Adaptive = /^(veo3\.1|veo_3_1)(?:-|$)/i.test(model);
 
   if (isComponents) {
     return {
@@ -65,14 +82,14 @@ export function resolveVeoUploadCapability(
       minFiles: 1,
       maxFiles: 3,
       slots: [
-        { key: 'reference', label: '参考图 1', required: true },
-        { key: 'reference', label: '参考图 2', required: false },
-        { key: 'reference', label: '参考图 3', required: false },
+        { key: 'reference', label: 'Reference 1', required: true },
+        { key: 'reference', label: 'Reference 2', required: false },
+        { key: 'reference', label: 'Reference 3', required: false },
       ],
     };
   }
 
-  if (isVeo2Frames || isOpenAIFast4K) {
+  if (isVeo2Frames || isOpenAIFast4K || isVeo31Adaptive) {
     return {
       isVeo: true,
       endpointFamily: family,
@@ -80,8 +97,8 @@ export function resolveVeoUploadCapability(
       minFiles: isVeo2Frames ? 1 : 0,
       maxFiles: 2,
       slots: [
-        { key: 'first', label: '首帧图', required: isVeo2Frames },
-        { key: 'last', label: '尾帧图', required: false },
+        { key: 'first', label: 'First frame', required: isVeo2Frames },
+        { key: 'last', label: 'Last frame', required: false },
       ],
     };
   }
@@ -93,7 +110,7 @@ export function resolveVeoUploadCapability(
       mode: 'single',
       minFiles: 1,
       maxFiles: 1,
-      slots: [{ key: 'single', label: '首帧图', required: true }],
+      slots: [{ key: 'single', label: 'First frame', required: true }],
     };
   }
 

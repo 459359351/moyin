@@ -45,7 +45,16 @@ const buildEndpoint = (baseUrl: string, path: string) => {
   return /\/v\d+$/.test(normalized) ? `${normalized}/${path}` : `${normalized}/v1/${path}`;
 };
 
+// Compatibility routing note:
+// - New image features should use generateStoryboardImage + submitGridImageRequest.
+// - New video features should use the unified callVideoGenerationApi path.
+// - Legacy helpers in this file are retained only for backward compatibility.
+let hasWarnedLegacyVideoRoute = false;
+
 /**
+ * @deprecated Compatibility helper kept for reference only.
+ * New image generation should use submitGridImageRequest.
+ *
  * Submit image generation task (legacy - kept for reference)
  */
 async function submitImageGenTask(
@@ -183,6 +192,9 @@ async function submitImageGenTask(
 }
 
 /**
+ * @deprecated Compatibility helper for older provider wiring.
+ * New image generation should use submitGridImageRequest.
+ *
  * Submit image generation task to Zhipu API
  */
 async function submitZhipuImageTask(
@@ -245,8 +257,9 @@ async function pollTaskCompletion(
   type: 'image' | 'video' = 'image',
   baseUrl?: string
 ): Promise<string> {
-  const maxAttempts = 120;
-  const pollInterval = 2000;
+  // Video default timeout: 15 minutes (5s * 180); image keeps shorter polling.
+  const maxAttempts = type === 'video' ? 180 : 120;
+  const pollInterval = type === 'video' ? 5000 : 2000;
 
   // Check for mock/sync tasks
   if (taskId.startsWith('mock_') || taskId.startsWith('sync_')) {
@@ -509,6 +522,9 @@ export async function generateStoryboardImage(
 }
 
 /**
+ * @deprecated Compatibility helper used by legacy generateSceneVideos route.
+ * New video generation should use callVideoGenerationApi.
+ *
  * Submit video generation task
  */
 async function submitVideoGenTask(
@@ -631,6 +647,9 @@ async function submitVideoGenTask(
 }
 
 /**
+ * @deprecated Compatibility helper used by legacy generateSceneVideos route.
+ * New video status polling should use the unified video polling path.
+ *
  * Poll video task status until completion
  * Uses the same unified /v1/tasks/ endpoint
  */
@@ -645,6 +664,9 @@ async function pollVideoTaskCompletion(
 }
 
 /**
+ * @deprecated Compatibility route kept for older Director panel entry points.
+ * Prefer unified video generation flow for all new work.
+ *
  * Generate videos for split scenes
  * Directly calls external APIs for Electron desktop app
  */
@@ -668,6 +690,13 @@ export async function generateSceneVideos(
   onSceneComplete?: (sceneId: number, videoUrl: string) => void,
   onSceneFailed?: (sceneId: number, error: string) => void
 ): Promise<Map<number, string>> {
+  if (!hasWarnedLegacyVideoRoute) {
+    console.warn(
+      '[StoryboardService] generateSceneVideos is a compatibility route. Use unified video generation flow for new features.'
+    );
+    hasWarnedLegacyVideoRoute = true;
+  }
+
   const results = new Map<number, string>();
 
   const {

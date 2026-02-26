@@ -332,8 +332,9 @@ async function pollTaskCompletion(
   provider: string,
   onProgress?: (progress: number) => void
 ): Promise<string> {
-  const maxAttempts = type === 'video' ? 120 : 60; // Video takes longer
-  const pollInterval = 2000; // 2 seconds
+  // Default video timeout: 15 minutes (5s * 180); image keeps fast polling.
+  const maxAttempts = type === 'video' ? 180 : 60;
+  const pollInterval = type === 'video' ? 5000 : 2000;
   
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (cancelled) {

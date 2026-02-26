@@ -357,7 +357,7 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
     toast.success(`画幅比已切换为 ${ratio}`);
   }, [setStoryboardConfig]);
 
-  const { getApiKey, getProviderByPlatform, concurrency } = useAPIConfigStore();
+  const { getApiKey, getProviderByPlatform } = useAPIConfigStore();
   const { addMediaFromUrl, getOrCreateCategoryFolder } = useMediaStore();
   
   // Get system category folder IDs for auto-saving (images → AI图片, videos → AI视频)
@@ -1165,192 +1165,51 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
     }
   }, [storyboardImage, splitScenes, storyboardConfig, getApiKey, updateSplitSceneImagePrompt, updateSplitSceneVideoPrompt, updateSplitSceneEndFramePrompt, updateSplitSceneNeedsEndFrame]);
 
-  /** @deprecated 使用 S级 generateAllGroups 或 handleGenerateSingleVideo 替代 */
+  // Legacy entry kept for compatibility with the existing batch button.
+  // It now reuses generateSingleShot (unified video path) and no longer calls /api/ai/video.
   const handleGenerateVideos = useCallback(async () => {
-    console.warn('[DEPRECATED] handleGenerateVideos 已废弃，请使用 S级批量生成');
     if (splitScenes.length === 0) {
       toast.error("没有可生成的分镜");
       return;
     }
 
-    const featureConfig = getFeatureConfig('video_generation');
-    if (!featureConfig) {
-      toast.error(getFeatureNotConfiguredMessage('video_generation'));
-      return;
-    }
-    const apiKey = featureConfig.apiKey;
-    const provider = featureConfig.platform;
-
-    // Check if all scenes have prompts
-    const scenesWithoutPrompts = splitScenes.filter(s => !s.videoPrompt.trim());
-    if (scenesWithoutPrompts.length > 0) {
-      toast.warning(`还有 ${scenesWithoutPrompts.length} 个分镜没有提示词，将使用默认提示词`);
-    }
-
-    // Filter scenes that need generation (idle or failed)
-    const scenesToGenerate = splitScenes.filter(
-      s => s.videoStatus === 'idle' || s.videoStatus === 'failed'
+    const scenesWithoutPrompts = splitScenes.filter(
+      (s) => !((s.videoPromptZh || s.videoPrompt || "").trim())
     );
+    if (scenesWithoutPrompts.length > 0) {
+      toast.warning(`${scenesWithoutPrompts.length} scenes have no video prompt; default prompt will be used.`);
+    }
 
+    const scenesToGenerate = splitScenes.filter(
+      (s) => !!s.imageDataUrl && (s.videoStatus === "idle" || s.videoStatus === "failed")
+    );
     if (scenesToGenerate.length === 0) {
       toast.info("所有分镜已生成或正在生成中");
       return;
     }
 
     setIsGenerating(true);
-    toast.info(`开始串行生成 ${scenesToGenerate.length} 个视频...每次处理 ${concurrency} 个`);
+    let successCount = 0;
+    let failedCount = 0;
 
-    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-
-    // Process scenes sequentially (serial) or with limited concurrency
-    for (let i = 0; i < scenesToGenerate.length; i += concurrency) {
-      const batch = scenesToGenerate.slice(i, i + concurrency);
-      
-      await Promise.all(batch.map(async (scene) => {
+    try {
+      for (const scene of scenesToGenerate) {
         setCurrentGeneratingId(scene.id);
-        
-        try {
-          // Update status to generating
-          updateSplitSceneVideo(scene.id, {
-            videoStatus: 'uploading',
-            videoProgress: 0,
-            videoError: null,
-          });
-
-          // Real API call - upload image first if needed
-          let imageUrl = scene.imageDataUrl;
-          if (scene.imageDataUrl.startsWith('data:')) {
-            const response = await fetch(scene.imageDataUrl);
-            const blob = await response.blob();
-            const formData = new FormData();
-            formData.append('file', blob, `scene-${scene.id}.png`);
-            
-            const uploadResponse = await fetch(`${baseUrl}/api/upload`, {
-              method: 'POST',
-              body: formData,
-            });
-
-            if (uploadResponse.ok) {
-              const uploadData = await uploadResponse.json();
-              imageUrl = uploadData.url || scene.imageDataUrl;
-            }
-          }
-
-          updateSplitSceneVideo(scene.id, {
-            videoStatus: 'generating',
-            videoProgress: 20,
-          });
-
-          // Submit video generation
-          // 使用统一 prompt-builder 构建prompt（与 handleGenerateSingleVideo 保持一致）
-          const cinProfile = projectData?.cinematographyProfileId
-            ? getCinematographyProfile(projectData.cinematographyProfileId)
-            : undefined;
-          const fullPrompt = buildVideoPrompt(scene, cinProfile, {
-            styleTokens: [getStylePrompt(currentStyleId)],
-            aspectRatio: storyboardConfig.aspectRatio,
-            mediaType: getMediaType(currentStyleId),
-          });
-          const videoDuration = Math.max(4, Math.min(12, scene.duration || 5));
-          
-          const submitResponse = await fetch(`${baseUrl}/api/ai/video`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              imageUrl,
-              prompt: fullPrompt || scene.videoPrompt || `分镜 ${scene.id + 1} 动态效果`,
-              aspectRatio: storyboardConfig.aspectRatio,
-              duration: videoDuration,
-              apiKey,
-              provider,
-            }),
-          });
-
-          if (!submitResponse.ok) {
-            const errorData = await submitResponse.json().catch(() => ({}));
-            throw new Error(errorData.error || `Video API failed: ${submitResponse.status}`);
-          }
-
-          const submitData = await submitResponse.json();
-
-          // If direct video URL returned
-          if (submitData.videoUrl && submitData.status === 'completed') {
-            updateSplitSceneVideo(scene.id, {
-              videoStatus: 'completed',
-              videoProgress: 100,
-              videoUrl: submitData.videoUrl,
-            });
-            toast.success(`分镜 ${scene.id + 1} 视频生成完成`);
-            return;
-          }
-
-          // Poll for completion
-          if (submitData.taskId) {
-            const pollInterval = 3000;
-            const maxAttempts = 120; // 6 minutes max
-            
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
-              const progress = Math.min(20 + Math.floor((attempt / maxAttempts) * 80), 99);
-              updateSplitSceneVideo(scene.id, { videoProgress: progress });
-
-              const statusResponse = await fetch(
-                `${baseUrl}/api/ai/task/${submitData.taskId}?apiKey=${encodeURIComponent(apiKey)}&provider=${provider}&type=video`
-              );
-
-              if (!statusResponse.ok) {
-                throw new Error(`Failed to check task status: ${statusResponse.status}`);
-              }
-
-              const statusData = await statusResponse.json();
-              const status = statusData.status?.toLowerCase();
-
-              if (status === 'completed' || status === 'success') {
-                const videoUrl = statusData.videoUrl || statusData.url || statusData.resultUrl;
-                if (!videoUrl) throw new Error('Task completed but no video URL');
-                
-                updateSplitSceneVideo(scene.id, {
-                  videoStatus: 'completed',
-                  videoProgress: 100,
-                  videoUrl,
-                });
-                toast.success(`分镜 ${scene.id + 1} 视频生成完成`);
-                return;
-              }
-
-              if (status === 'failed' || status === 'error') {
-                throw new Error(statusData.error || 'Video generation failed');
-              }
-
-              await new Promise(r => setTimeout(r, pollInterval));
-            }
-
-            throw new Error('视频生成超时');
-          }
-
-          throw new Error('Invalid API response');
-
-        } catch (error) {
-          const err = error as Error;
-          console.error(`[SplitScenes] Scene ${scene.id} video generation failed:`, err);
-          updateSplitSceneVideo(scene.id, {
-            videoStatus: 'failed',
-            videoProgress: 0,
-            videoError: err.message,
-          });
-          toast.error(`分镜 ${scene.id + 1} 生成失败: ${err.message}`);
-        }
-      }));
+        const ok = await generateSingleShot(scene.id);
+        if (ok) successCount++;
+        else failedCount++;
+      }
+    } finally {
+      setIsGenerating(false);
+      setCurrentGeneratingId(null);
     }
 
-    setIsGenerating(false);
-    setCurrentGeneratingId(null);
-    
-    const completedCount = splitScenes.filter(s => s.videoStatus === 'completed').length;
-    if (completedCount === splitScenes.length) {
-      toast.success("所有视频生成完成！");
+    if (failedCount === 0) {
+      toast.success(`Batch generation completed: ${successCount} scenes succeeded.`);
+      return;
     }
-  }, [splitScenes, storyboardConfig, getApiKey, concurrency, updateSplitSceneVideo]);
-
+    toast.warning(`Batch generation finished: ${successCount} succeeded, ${failedCount} failed.`);
+  }, [splitScenes, generateSingleShot]);
 
   // Generate video for a single scene - directly calls API with key rotation
   const handleGenerateSingleVideo = useCallback(async (sceneId: number) => {
