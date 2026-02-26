@@ -314,6 +314,7 @@ export function GenerationPanel({ selectedCharacter, onCharacterCreated }: Gener
 
   // 创建新角色并生成图片（始终新建，不会覆盖已有角色）
   const handleCreateAndGenerate = async () => {
+    if (isGenerating) return;
     if (!name.trim()) {
       toast.error("请输入角色名称");
       return;

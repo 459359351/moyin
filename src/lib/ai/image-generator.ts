@@ -21,6 +21,12 @@ export interface ImageGenerationParams {
   resolution?: '1K' | '2K' | '4K';
   referenceImages?: string[];  // Base64 encoded images
   styleId?: string;
+  seedreamOptions?: {
+    sequentialImageGeneration?: 'auto' | 'disabled';
+    responseFormat?: 'url' | 'b64_json';
+    watermark?: boolean;
+    stream?: boolean;
+  };
 }
 
 export interface ImageGenerationResult {
@@ -56,6 +62,75 @@ const RESOLUTION_MULTIPLIERS: Record<string, number> = {
   '4K': 4,
 };
 
+const OPENAI_SIZE_MODEL_RE = /gpt-image|dall-e|dalle|flux|ideogram|stable-diffusion|sdxl|sd3|recraft|kolors/i;
+const SEEDREAM_MODEL_RE = /doubao[-_]?seedream|seedream/i;
+
+const SEEDREAM_AREA_BY_RESOLUTION: Record<'1K' | '2K' | '4K', number> = {
+  '1K': 1024 * 1024,
+  '2K': 2048 * 2048,
+  '4K': 4096 * 4096,
+};
+
+function isSeedreamModel(model?: string): boolean {
+  return !!model && SEEDREAM_MODEL_RE.test(model.toLowerCase());
+}
+
+function normalizeSeedreamResolution(resolution?: string): '1K' | '2K' | '4K' | undefined {
+  if (!resolution) return undefined;
+  const normalized = resolution.toUpperCase();
+  if (normalized === '1K' || normalized === '2K' || normalized === '4K') {
+    return normalized;
+  }
+  return undefined;
+}
+
+function parseAspectRatio(aspectRatio: string): { width: number; height: number } | null {
+  const parts = aspectRatio.split(':').map(v => Number(v));
+  if (parts.length !== 2) return null;
+  const [width, height] = parts;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return { width, height };
+}
+
+function toSeedreamPixelSize(aspectRatio: string, resolution?: '1K' | '2K' | '4K'): string {
+  const targetResolution = resolution || '2K';
+  const targetArea = SEEDREAM_AREA_BY_RESOLUTION[targetResolution];
+  const ratio = parseAspectRatio(aspectRatio);
+
+  let ratioValue = 1;
+  if (ratio) {
+    ratioValue = ratio.width / ratio.height;
+  } else {
+    const dims = ASPECT_RATIO_DIMS[aspectRatio];
+    if (dims && dims.height > 0) {
+      ratioValue = dims.width / dims.height;
+    }
+  }
+
+  if (!Number.isFinite(ratioValue) || ratioValue <= 0) {
+    return '2048x2048';
+  }
+
+  let width = Math.round(Math.sqrt(targetArea * ratioValue));
+  let height = Math.round(Math.sqrt(targetArea / ratioValue));
+
+  if (width > 4096) {
+    width = 4096;
+    height = Math.max(256, Math.round(width / ratioValue));
+  }
+  if (height > 4096) {
+    height = 4096;
+    width = Math.max(256, Math.round(height * ratioValue));
+  }
+
+  if (width % 2 !== 0) width -= 1;
+  if (height % 2 !== 0) height -= 1;
+  width = Math.max(256, width);
+  height = Math.max(256, height);
+
+  return `${width}x${height}`;
+}
+
 function getTargetDimensions(aspectRatio: string, resolution?: string): { width: number; height: number } | undefined {
   const baseDims = ASPECT_RATIO_DIMS[aspectRatio];
   if (!baseDims) return undefined;
@@ -76,6 +151,64 @@ function needsPixelSize(model: string): boolean {
 }
 
 /**
+ * Map app aspect ratio to OpenAI images/generations size values.
+ * gpt-image models only accept a limited size set.
+ */
+function mapAspectRatioToOpenAIImageSize(aspectRatio: string): string {
+  if (aspectRatio === '1:1') return '1024x1024';
+  if (aspectRatio === '16:9' || aspectRatio === '4:3' || aspectRatio === '3:2' || aspectRatio === '21:9') {
+    return '1536x1024';
+  }
+  if (aspectRatio === '9:16' || aspectRatio === '3:4' || aspectRatio === '2:3') {
+    return '1024x1536';
+  }
+
+  const parts = aspectRatio.split(':').map(v => Number(v));
+  if (parts.length === 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1]) && parts[0] > 0 && parts[1] > 0) {
+    return parts[0] >= parts[1] ? '1536x1024' : '1024x1536';
+  }
+  return 'auto';
+}
+
+/**
+ * Resolve request size for /v1/images/generations with model-aware compatibility.
+ */
+function getImagesGenerationSize(
+  aspectRatio: string,
+  model?: string,
+  options?: { resolution?: string; width?: number; height?: number }
+): string {
+  if (!model) return aspectRatio;
+
+  if (isSeedreamModel(model)) {
+    const width = options?.width;
+    const height = options?.height;
+    if (Number.isFinite(width) && Number.isFinite(height) && (width as number) > 0 && (height as number) > 0) {
+      return `${Math.round(width as number)}x${Math.round(height as number)}`;
+    }
+
+    const normalizedResolution = normalizeSeedreamResolution(options?.resolution);
+    if (aspectRatio === '1:1' && normalizedResolution) {
+      return normalizedResolution;
+    }
+    return toSeedreamPixelSize(aspectRatio, normalizedResolution);
+  }
+
+  // OpenAI-compatible image models are more stable with explicit pixel sizes.
+  if (OPENAI_SIZE_MODEL_RE.test(model)) {
+    return mapAspectRatioToOpenAIImageSize(aspectRatio);
+  }
+
+  // Some models require pixel WxH instead of ratio strings.
+  if (needsPixelSize(model)) {
+    const dims = ASPECT_RATIO_DIMS[aspectRatio];
+    if (dims) return `${dims.width}x${dims.height}`;
+  }
+
+  return aspectRatio;
+}
+
+/**
  * Generate image for character
  */
 export async function generateCharacterImage(params: ImageGenerationParams): Promise<ImageGenerationResult> {
@@ -86,7 +219,7 @@ export async function generateCharacterImage(params: ImageGenerationParams): Pro
  * Generate image for scene
  */
 export async function generateSceneImage(params: ImageGenerationParams): Promise<ImageGenerationResult> {
-  return generateImage(params, 'character_generation');
+  return generateImage(params, 'scene_generation', 'character_generation');
 }
 
 /**
@@ -95,9 +228,21 @@ export async function generateSceneImage(params: ImageGenerationParams): Promise
  */
 async function generateImage(
   params: ImageGenerationParams,
-  feature: 'character_generation'
+  feature: 'character_generation' | 'scene_generation',
+  fallbackFeature?: 'character_generation'
 ): Promise<ImageGenerationResult> {
-  const featureConfig = getFeatureConfig(feature);
+  let resolvedFeature = feature;
+  let featureConfig = getFeatureConfig(feature);
+
+  if (!featureConfig && fallbackFeature) {
+    const fallbackConfig = getFeatureConfig(fallbackFeature);
+    if (fallbackConfig) {
+      resolvedFeature = fallbackFeature;
+      featureConfig = fallbackConfig;
+      console.warn(`[ImageGenerator] Feature "${feature}" not configured, fallback to "${fallbackFeature}"`);
+    }
+  }
+
   if (!featureConfig) {
     throw new Error(getFeatureNotConfiguredMessage(feature));
   }
@@ -105,7 +250,7 @@ async function generateImage(
   const baseUrl = featureConfig.baseUrl?.replace(/\/+$/, '');
   const model = featureConfig.models?.[0];
   if (!apiKey || !baseUrl || !model) {
-    throw new Error(getFeatureNotConfiguredMessage(feature));
+    throw new Error(getFeatureNotConfiguredMessage(resolvedFeature));
   }
 
   const aspectRatio = params.aspectRatio || '1:1';
@@ -150,7 +295,10 @@ async function generateImage(
     apiKey,
     params.referenceImages,
     model,
-    baseUrl
+    baseUrl,
+    params.seedreamOptions,
+    params.width,
+    params.height
   );
 
   if (result.imageUrl) {
@@ -272,27 +420,32 @@ async function submitImageTask(
   apiKey: string,
   referenceImages?: string[],
   model?: string,
-  baseUrl?: string
+  baseUrl?: string,
+  seedreamOptions?: ImageGenerationParams['seedreamOptions'],
+  width?: number,
+  height?: number
 ): Promise<{ taskId?: string; imageUrl?: string }> {
   if (!baseUrl) {
     throw new Error('请先在设置中配置图片生成服务映射');
   }
   // 根据模型决定 size 格式
-  let sizeValue: string = aspectRatio;
-  if (model && needsPixelSize(model)) {
-    const dims = ASPECT_RATIO_DIMS[aspectRatio];
-    if (dims) {
-      sizeValue = `${dims.width}x${dims.height}`;
-    }
-  }
+  const sizeValue = getImagesGenerationSize(aspectRatio, model, { resolution, width, height });
+  const isSeedream = isSeedreamModel(model);
 
   const requestData: Record<string, unknown> = {
     model: model,
     prompt,
     n: 1,
     size: sizeValue,
-    stream: false,
   };
+  if (isSeedream) {
+    requestData.stream = seedreamOptions?.stream ?? false;
+    requestData.sequential_image_generation = seedreamOptions?.sequentialImageGeneration ?? 'disabled';
+    requestData.response_format = seedreamOptions?.responseFormat ?? 'url';
+    requestData.watermark = seedreamOptions?.watermark ?? false;
+  } else {
+    requestData.stream = false;
+  }
 
   if (referenceImages && referenceImages.length > 0) {
     console.log('[ImageGenerator] Adding reference images:', referenceImages.length);
@@ -302,12 +455,12 @@ async function submitImageTask(
   console.log('[ImageGenerator] Submitting image task:', {
     model: requestData.model,
     size: requestData.size,
-    resolution: requestData.resolution,
+    isSeedream,
     hasImageUrls: !!requestData.image_urls,
   });
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  const timeoutId = setTimeout(() => controller.abort(), 150000);
 
   try {
     const data = await retryOperation(async () => {
@@ -327,9 +480,15 @@ async function submitImageTask(
         console.error('[ImageGenerator] API error:', response.status, errorText);
 
         let errorMessage = `图片生成 API 错误: ${response.status}`;
+        let errorCode: string | undefined;
+        let errorType: string | undefined;
         try {
           const errorJson = JSON.parse(errorText);
           errorMessage = errorJson.error?.message || errorJson.message || errorJson.msg || errorMessage;
+          const codeFromError = errorJson.error?.code ?? errorJson.code;
+          const typeFromError = errorJson.error?.type ?? errorJson.type;
+          if (codeFromError != null) errorCode = String(codeFromError);
+          if (typeFromError != null) errorType = String(typeFromError);
         } catch {
           if (errorText && errorText.length < 200) errorMessage = errorText;
         }
@@ -340,8 +499,10 @@ async function submitImageTask(
           throw new Error('图片生成服务暂时不可用');
         }
 
-        const error = new Error(errorMessage) as Error & { status?: number };
+        const error = new Error(errorMessage) as Error & { status?: number; code?: string; type?: string };
         error.status = response.status;
+        if (errorCode) error.code = errorCode;
+        if (errorType) error.type = errorType;
         throw error;
       }
 
@@ -358,8 +519,7 @@ async function submitImageTask(
       }
     }, {
       maxRetries: 3,
-      baseDelay: 3000,
-      retryOn429: true,
+      baseDelay: 5000,
     });
 
     clearTimeout(timeoutId);
@@ -385,13 +545,16 @@ async function submitImageTask(
     if (Array.isArray(dataList) && dataList.length > 0) {
       // 直接返回 URL（doubao-seedream、DALL-E 等同步模型）
       if (dataList[0].url) return { imageUrl: dataList[0].url };
+      if (dataList[0].b64_json) return { imageUrl: `data:image/png;base64,${dataList[0].b64_json}` };
       taskId = dataList[0].task_id?.toString();
     }
     taskId = taskId || data.task_id?.toString();
 
     if (!taskId) {
       const directUrl = data.data?.[0]?.url || data.url;
+      const directB64 = data.data?.[0]?.b64_json || data.b64_json;
       if (directUrl) return { imageUrl: directUrl };
+      if (directB64) return { imageUrl: `data:image/png;base64,${directB64}` };
       throw new Error('No task_id or image URL in response');
     }
 
@@ -496,8 +659,9 @@ export async function submitGridImageRequest(params: {
   aspectRatio: string;
   resolution?: string;
   referenceImages?: string[];
+  seedreamOptions?: ImageGenerationParams['seedreamOptions'];
 }): Promise<{ imageUrl?: string; taskId?: string }> {
-  const { model, prompt, apiKey, baseUrl, aspectRatio, resolution, referenceImages } = params;
+  const { model, prompt, apiKey, baseUrl, aspectRatio, resolution, referenceImages, seedreamOptions } = params;
   const normalizedBase = baseUrl.replace(/\/+$/, '');
 
   // 检测 API 格式（与 generateImage 一致）
@@ -523,10 +687,19 @@ export async function submitGridImageRequest(params: {
     model,
     prompt,
     n: 1,
-    aspect_ratio: aspectRatio,
   };
-  if (resolution) {
-    requestBody.resolution = resolution;
+  const useSizeField = isSeedreamModel(model) || OPENAI_SIZE_MODEL_RE.test(model) || needsPixelSize(model);
+  if (useSizeField) {
+    requestBody.size = getImagesGenerationSize(aspectRatio, model, { resolution });
+  } else {
+    requestBody.aspect_ratio = aspectRatio;
+    if (resolution) requestBody.resolution = resolution;
+  }
+  if (isSeedreamModel(model)) {
+    requestBody.stream = seedreamOptions?.stream ?? false;
+    requestBody.sequential_image_generation = seedreamOptions?.sequentialImageGeneration ?? 'disabled';
+    requestBody.response_format = seedreamOptions?.responseFormat ?? 'url';
+    requestBody.watermark = seedreamOptions?.watermark ?? false;
   }
   if (referenceImages && referenceImages.length > 0) {
     requestBody.image_urls = referenceImages;
@@ -579,13 +752,14 @@ export async function submitGridImageRequest(params: {
     || normalizeUrl(data.url)
     || normalizeUrl(data.image_url)
     || normalizeUrl(data.output_url);
+  const b64Image = firstItem?.b64_json || data.b64_json;
 
   const taskId = firstItem?.task_id?.toString()
     || firstItem?.id?.toString()
     || data.task_id?.toString()
     || data.id?.toString();
 
-  return { imageUrl, taskId };
+  return { imageUrl: imageUrl || (b64Image ? `data:image/png;base64,${b64Image}` : undefined), taskId };
 }
 
 /**

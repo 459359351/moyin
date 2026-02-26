@@ -19,12 +19,26 @@ export function isRateLimitError(error: unknown): boolean {
   if (!error) return false;
   
   const err = error as any;
+  const message = err.message?.toLowerCase() || "";
+  const code = String(err.code ?? '').toLowerCase();
+
+  // Do not retry moderation/policy blocking errors.
+  if (
+    code.includes('moderation') ||
+    code.includes('forbidden') ||
+    message.includes('moderation_blocked') ||
+    message.includes('content policy') ||
+    message.includes('safety system') ||
+    message.includes('temporarily blocked') ||
+    message.includes('forbidden')
+  ) {
+    return false;
+  }
   
   // Check status code
   if (err.status === 429 || err.code === 429) return true;
   
   // Check error message
-  const message = err.message?.toLowerCase() || "";
   if (
     message.includes("429") ||
     message.includes("quota") ||

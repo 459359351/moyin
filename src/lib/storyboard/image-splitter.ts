@@ -39,7 +39,7 @@ export interface SplitOptions {
   filterEmpty?: boolean;   // Whether to filter out empty/black cells (default: true)
   expectedCols?: number;   // Hint for expected column count
   expectedRows?: number;   // Hint for expected row count
-  edgeMarginPercent?: number; // Edge margin to crop from each cell (default: 0.03 = 3%)
+  edgeMarginPercent?: number; // Edge margin to crop from each cell (default: 0.005 = 0.5%)
 }
 
 export interface SplitConfig {
@@ -519,7 +519,7 @@ export async function splitStoryboardImage(
   const { threshold = 30, filterEmpty = true } = options;
   
   // Edge margin percentage for cropping separator line residue
-  const edgeMarginPercent = options.edgeMarginPercent ?? 0.03; // Default 3%
+  const edgeMarginPercent = options.edgeMarginPercent ?? 0.005; // Default 0.5%
 
   const img = await loadImage(imageSrc);
   const totalWidth = img.width;
@@ -587,9 +587,8 @@ export async function splitStoryboardImage(
   
   // Calculate Safety Margin (Inset) - 在裁剪后的区域内再收缩
   // Default to 0.5% (0.005) if not specified
-  const finalEdgeMargin = options.edgeMarginPercent ?? 0.005;
-  const marginW = Math.floor(cropW * finalEdgeMargin);
-  const marginH = Math.floor(cropH * finalEdgeMargin);
+  const marginW = Math.floor(cropW * edgeMarginPercent);
+  const marginH = Math.floor(cropH * edgeMarginPercent);
   
   console.log('[ImageSplitter] Split params:', {
     cellRaw: `${cellWidth}x${cellHeight}`,
@@ -597,7 +596,7 @@ export async function splitStoryboardImage(
     targetRatio: targetRatio.toFixed(3),
     cropRegion: `${cropW}x${cropH} (offset: ${cropX}, ${cropY})`,
     outputStrict: `${outputWidth}x${outputHeight}`,
-    margin: `${marginW}px x ${marginH}px (${finalEdgeMargin * 100}%)`,
+    margin: `${marginW}px x ${marginH}px (${edgeMarginPercent * 100}%)`,
   });
   
   // Generate cell definitions using uniform grid
@@ -630,10 +629,16 @@ export async function splitStoryboardImage(
 
     // Calculate source rectangle with CROP + INSET (居中裁剪 + 安全边距)
     // 先应用居中裁剪偏移，再应用安全边距
-    const srcX = def.x + cropX + marginW;
-    const srcY = def.y + cropY + marginH;
-    const srcW = cropW - (marginW * 2);
-    const srcH = cropH - (marginH * 2);
+    let srcX = def.x + cropX + marginW;
+    let srcY = def.y + cropY + marginH;
+    let srcW = cropW - (marginW * 2);
+    let srcH = cropH - (marginH * 2);
+    if (srcW <= 8 || srcH <= 8) {
+      srcX = def.x + cropX;
+      srcY = def.y + cropY;
+      srcW = cropW;
+      srcH = cropH;
+    }
 
     // Draw the cell region from source image (with crop correction)
     ctx.drawImage(
@@ -672,8 +677,10 @@ export async function splitStoryboardImage(
     });
   }
 
-  console.log(`[ImageSplitter] Split complete: ${results.length} valid cells from ${cellDefs.length} total`);
-  return results;
+  const sorted = results.sort((a, b) => a.originalIndex - b.originalIndex);
+  const limited = sorted.slice(0, sceneCount).map((item, idx) => ({ ...item, id: idx }));
+  console.log(`[ImageSplitter] Split complete: ${limited.length} valid cells from ${cellDefs.length} total`);
+  return limited;
 }
 
 // ==================== Export Index ====================

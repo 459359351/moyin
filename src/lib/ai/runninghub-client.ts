@@ -105,7 +105,6 @@ export async function submitAngleSwitchTask(
     }, {
       maxRetries: 3,
       baseDelay: 3000,
-      retryOn429: true,
     });
 
     console.log('[RunningHub] Submit response:', data);

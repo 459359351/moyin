@@ -14,6 +14,40 @@ const buildEndpoint = (baseUrl: string, path: string) => {
   const normalized = baseUrl.replace(/\/+$/, '');
   return /\/v\d+$/.test(normalized) ? `${normalized}/${path}` : `${normalized}/v1/${path}`;
 };
+const SEEDREAM_MODEL_RE = /doubao[-_]?seedream|seedream/i;
+const SEEDREAM_AREA_BY_RESOLUTION: Record<'1K' | '2K' | '4K', number> = {
+  '1K': 1024 * 1024,
+  '2K': 2048 * 2048,
+  '4K': 4096 * 4096,
+};
+
+function isSeedreamModel(model: string): boolean {
+  return SEEDREAM_MODEL_RE.test((model || '').toLowerCase());
+}
+
+function toSeedreamSize(
+  aspectRatio: '16:9' | '9:16',
+  resolution: '1K' | '2K' | '4K'
+): string {
+  const [w, h] = aspectRatio.split(':').map(Number);
+  const ratio = w / h;
+  const area = SEEDREAM_AREA_BY_RESOLUTION[resolution];
+  let width = Math.round(Math.sqrt(area * ratio));
+  let height = Math.round(Math.sqrt(area / ratio));
+
+  if (width > 4096) {
+    width = 4096;
+    height = Math.max(256, Math.round(width / ratio));
+  }
+  if (height > 4096) {
+    height = 4096;
+    width = Math.max(256, Math.round(height * ratio));
+  }
+  if (width % 2 !== 0) width -= 1;
+  if (height % 2 !== 0) height -= 1;
+
+  return `${Math.max(256, width)}x${Math.max(256, height)}`;
+}
 
 export interface ShotGenerationConfig {
   apiKey: string;
@@ -137,6 +171,7 @@ export async function generateShotImage(
   onProgress?: (progress: number) => void
 ): Promise<string> {
   const { apiKey, baseUrl, model, aspectRatio = '16:9', styleTokens = [], referenceImages = [] } = config;
+  const isSeedream = isSeedreamModel(model);
 
   if (!apiKey) {
     throw new Error('API Key is required');
@@ -165,9 +200,16 @@ export async function generateShotImage(
     model,
     prompt,
     n: 1,
-    size: aspectRatio,
-    resolution: config.imageResolution || '2K',
+    size: isSeedream ? toSeedreamSize(aspectRatio, config.imageResolution || '2K') : aspectRatio,
   };
+  if (isSeedream) {
+    requestData.sequential_image_generation = 'disabled';
+    requestData.response_format = 'url';
+    requestData.watermark = false;
+    requestData.stream = false;
+  } else {
+    requestData.resolution = config.imageResolution || '2K';
+  }
 
   // Add reference images for character consistency
   if (referenceImages.length > 0) {
@@ -211,9 +253,10 @@ export async function generateShotImage(
 
   // Check for direct URL
   const directUrl = data.data?.[0]?.url || data.url;
-  if (directUrl) {
+  const directB64 = data.data?.[0]?.b64_json || data.b64_json;
+  if (directUrl || directB64) {
     onProgress?.(100);
-    return directUrl;
+    return directUrl || `data:image/png;base64,${directB64}`;
   }
 
   // Get task ID and poll

@@ -87,6 +87,7 @@ export function CharacterGenerator({ character }: CharacterGeneratorProps) {
   };
 
   const handleGenerateSheet = async () => {
+    if (isGenerating) return;
     if (!description.trim()) {
       toast.error("请输入角色描述");
       return;

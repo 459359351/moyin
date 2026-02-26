@@ -101,6 +101,14 @@ interface SplitScenesProps {
 // SceneCard 已移至 split-scene-card.tsx，此处使用 SplitSceneCard
 const SceneCard = SplitSceneCard;
 
+function buildTaskStatusUrl(baseUrl: string, taskId: string): URL {
+  const normalized = baseUrl.replace(/\/+$/, '');
+  const endpoint = /\/v\d+$/.test(normalized)
+    ? `${normalized}/tasks/${taskId}`
+    : `${normalized}/v1/tasks/${taskId}`;
+  return new URL(endpoint);
+}
+
 export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
   // ========== 合并生成（九宫格）本地 UI 状态 ==========
   const [imageGenMode, setImageGenMode] = useState<'single' | 'merged'>('single');
@@ -783,7 +791,7 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
         const maxAttempts = 60;
         
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          const statusUrl = new URL(`${imageBaseUrl}/v1/tasks/${taskId}`);
+          const statusUrl = buildTaskStatusUrl(imageBaseUrl, taskId);
           statusUrl.searchParams.set('_ts', Date.now().toString());
           
           const statusResp = await fetch(statusUrl.toString(), {
@@ -1639,7 +1647,7 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
           const progress = Math.min(Math.floor((attempt / maxAttempts) * 100), 99);
           updateSplitSceneImageStatus(sceneId, { imageProgress: progress });
 
-          const url = new URL(`${imageBaseUrl}/v1/tasks/${taskId}`);
+          const url = buildTaskStatusUrl(imageBaseUrl, taskId);
           url.searchParams.set('_ts', Date.now().toString());
 
           const statusResponse = await fetch(url.toString(), {
@@ -2163,7 +2171,7 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
             }
           });
           
-          const statusUrl = new URL(`${imageBaseUrl}/v1/tasks/${taskId}`);
+          const statusUrl = buildTaskStatusUrl(imageBaseUrl, taskId);
           statusUrl.searchParams.set('_ts', Date.now().toString());
           
           const statusResp = await fetch(statusUrl.toString(), {
@@ -2375,7 +2383,7 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
         const progress = Math.min(Math.floor((attempt / maxAttempts) * 100), 99);
         if (isEndFrame) updateSplitSceneEndFrameStatus(sceneId, { endFrameProgress: progress });
         else updateSplitSceneImageStatus(sceneId, { imageProgress: progress });
-        const url = new URL(`${imageBaseUrl}/v1/tasks/${taskId}`);
+        const url = buildTaskStatusUrl(imageBaseUrl, taskId);
         url.searchParams.set('_ts', Date.now().toString());
         const statusResp = await fetch(url.toString(), { method: 'GET', headers: { 'Authorization': `Bearer ${apiKeyToUse}`, 'Cache-Control': 'no-cache' } });
         if (!statusResp.ok) throw new Error(`Failed to check task status: ${statusResp.status}`);
@@ -2558,7 +2566,7 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
           const progress = Math.min(Math.floor((attempt / maxAttempts) * 100), 99);
           updateSplitSceneEndFrameStatus(sceneId, { endFrameProgress: progress });
 
-          const url = new URL(`${imageBaseUrl}/v1/tasks/${taskId}`);
+          const url = buildTaskStatusUrl(imageBaseUrl, taskId);
           url.searchParams.set('_ts', Date.now().toString());
 
           const statusResponse = await fetch(url.toString(), {

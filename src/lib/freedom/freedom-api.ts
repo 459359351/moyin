@@ -69,6 +69,12 @@ const VIDEO_POLL_MAX_ATTEMPTS = 120;
 // Retry config
 const RETRY_MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY = 3000;
+const SEEDREAM_MODEL_RE = /doubao[-_]?seedream|seedream/i;
+const SEEDREAM_AREA_BY_RESOLUTION: Record<'1K' | '2K' | '4K', number> = {
+  '1K': 1024 * 1024,
+  '2K': 2048 * 2048,
+  '4K': 4096 * 4096,
+};
 
 // ==================== Retry Logic ====================
 
@@ -131,6 +137,56 @@ function buildEndpoint(baseUrl: string, path: string): string {
 function getRootBaseUrl(baseUrl: string): string {
   const normalized = baseUrl.replace(/\/+$/, '');
   return normalized.replace(/\/v\d+$/, '');
+}
+
+function isSeedreamModel(model: string): boolean {
+  return SEEDREAM_MODEL_RE.test((model || '').toLowerCase());
+}
+
+function normalizeSeedreamResolution(resolution?: string): '1K' | '2K' | '4K' {
+  const normalized = (resolution || '2K').toUpperCase();
+  if (normalized === '1K' || normalized === '4K') return normalized;
+  return '2K';
+}
+
+function parseAspectRatio(aspectRatio?: string): { width: number; height: number } | null {
+  if (!aspectRatio) return null;
+  const parts = aspectRatio.split(':').map(Number);
+  if (parts.length !== 2) return null;
+  const [width, height] = parts;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return { width, height };
+}
+
+function toSeedreamSize(aspectRatio?: string, resolution?: string, width?: number, height?: number): string {
+  if (Number.isFinite(width) && Number.isFinite(height) && (width as number) > 0 && (height as number) > 0) {
+    return `${Math.round(width as number)}x${Math.round(height as number)}`;
+  }
+
+  const normalizedResolution = normalizeSeedreamResolution(resolution);
+  if ((aspectRatio || '1:1') === '1:1') {
+    return normalizedResolution;
+  }
+
+  const ratio = parseAspectRatio(aspectRatio) || { width: 1, height: 1 };
+  const ratioValue = ratio.width / ratio.height;
+  const targetArea = SEEDREAM_AREA_BY_RESOLUTION[normalizedResolution];
+
+  let targetWidth = Math.round(Math.sqrt(targetArea * ratioValue));
+  let targetHeight = Math.round(Math.sqrt(targetArea / ratioValue));
+
+  if (targetWidth > 4096) {
+    targetWidth = 4096;
+    targetHeight = Math.max(256, Math.round(targetWidth / ratioValue));
+  }
+  if (targetHeight > 4096) {
+    targetHeight = 4096;
+    targetWidth = Math.max(256, Math.round(targetHeight * ratioValue));
+  }
+  if (targetWidth % 2 !== 0) targetWidth -= 1;
+  if (targetHeight % 2 !== 0) targetHeight -= 1;
+
+  return `${Math.max(256, targetWidth)}x${Math.max(256, targetHeight)}`;
 }
 
 function pickFeatureConfig(feature: AIFeature, requestedModel?: string): FeatureConfig | null {
@@ -399,14 +455,27 @@ async function generateViaImagesEndpoint(
     prompt: params.prompt,
     model,
   };
-
-  if (params.aspectRatio) body.aspect_ratio = params.aspectRatio;
-  if (params.resolution) body.resolution = params.resolution;
-  if (params.width) body.width = params.width;
-  if (params.height) body.height = params.height;
-  if (params.negativePrompt) body.negative_prompt = params.negativePrompt;
-  if (params.extraParams) {
-    Object.assign(body, params.extraParams);
+  if (isSeedreamModel(model)) {
+    body.size = toSeedreamSize(params.aspectRatio, params.resolution, params.width, params.height);
+    body.sequential_image_generation = 'disabled';
+    body.response_format = 'url';
+    body.watermark = false;
+    body.stream = false;
+    if (params.negativePrompt) body.negative_prompt = params.negativePrompt;
+    if (params.extraParams) Object.assign(body, params.extraParams);
+    delete body.aspect_ratio;
+    delete body.resolution;
+    delete body.width;
+    delete body.height;
+  } else {
+    if (params.aspectRatio) body.aspect_ratio = params.aspectRatio;
+    if (params.resolution) body.resolution = params.resolution;
+    if (params.width) body.width = params.width;
+    if (params.height) body.height = params.height;
+    if (params.negativePrompt) body.negative_prompt = params.negativePrompt;
+    if (params.extraParams) {
+      Object.assign(body, params.extraParams);
+    }
   }
 
   const submitUrl = buildEndpoint(baseUrl, 'images/generations');
@@ -432,7 +501,7 @@ async function generateViaImagesEndpoint(
   // If async task, poll for result
   if (!imageUrl && data.task_id) {
     imageUrl = await pollForResult(
-      `${baseUrl}/v1/images/generations/${data.task_id}`,
+      buildEndpoint(baseUrl, `images/generations/${data.task_id}`),
       apiKey,
       IMAGE_POLL_INTERVAL,
       IMAGE_POLL_MAX_ATTEMPTS

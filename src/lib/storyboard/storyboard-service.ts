@@ -141,7 +141,6 @@ async function submitImageGenTask(
     }, {
       maxRetries: 3,
       baseDelay: 3000,
-      retryOn429: true,
     });
 
     clearTimeout(timeoutId);
@@ -244,7 +243,7 @@ async function pollTaskCompletion(
   apiKey: string,
   onProgress?: (progress: number) => void,
   type: 'image' | 'video' = 'image',
-  baseUrl: string
+  baseUrl?: string
 ): Promise<string> {
   const maxAttempts = 120;
   const pollInterval = 2000;
@@ -252,6 +251,10 @@ async function pollTaskCompletion(
   // Check for mock/sync tasks
   if (taskId.startsWith('mock_') || taskId.startsWith('sync_')) {
     return '';
+  }
+
+  if (!baseUrl) {
+    throw new Error('Base URL is required for polling task status');
   }
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -601,8 +604,7 @@ async function submitVideoGenTask(
     return response.json();
   }, {
     maxRetries: 3,
-      baseDelay: 5000,
-    retryOn429: true,
+    baseDelay: 5000,
   });
 
   console.log('[StoryboardService] Video API response:', data);
@@ -636,7 +638,7 @@ async function pollVideoTaskCompletion(
   taskId: string,
   apiKey: string,
   onProgress?: (progress: number) => void,
-  baseUrl: string
+  baseUrl?: string
 ): Promise<string> {
   // Use the unified polling function with video type and dynamic baseUrl
   return pollTaskCompletion(taskId, apiKey, onProgress, 'video', baseUrl);

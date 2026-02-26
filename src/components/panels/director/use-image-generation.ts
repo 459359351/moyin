@@ -15,6 +15,14 @@ export function normalizeUrl(url: unknown): string | undefined {
   return undefined;
 }
 
+function buildTaskStatusUrl(baseUrl: string, taskId: string): URL {
+  const normalized = baseUrl.replace(/\/+$/, '');
+  const endpoint = /\/v\d+$/.test(normalized)
+    ? `${normalized}/tasks/${taskId}`
+    : `${normalized}/v1/tasks/${taskId}`;
+  return new URL(endpoint);
+}
+
 // Process reference images to API-compatible format
 export async function processReferenceImages(urls: string[], maxCount: number = 4): Promise<string[]> {
   const processedRefs: string[] = [];
@@ -125,7 +133,7 @@ export async function callImageGenerationApi(
       const progress = Math.min(Math.floor((attempt / maxAttempts) * 100), 99);
       onProgress?.(progress);
 
-      const url = new URL(`${imageBaseUrl}/v1/tasks/${taskId}`);
+      const url = buildTaskStatusUrl(imageBaseUrl, taskId);
       url.searchParams.set('_ts', Date.now().toString());
 
       const statusResponse = await fetch(url.toString(), {
