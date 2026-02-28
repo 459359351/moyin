@@ -21,6 +21,113 @@ declare global {
 
 export type ImageCategory = 'characters' | 'scenes' | 'shots' | 'wardrobe' | 'videos';
 
+// ==================== IndexedDB Image Cache (Browser Mode) ====================
+
+const IDB_NAME = 'moyin-image-cache';
+const IDB_STORE = 'images';
+let idbInstance: IDBDatabase | null = null;
+
+/**
+ * Open (or reuse) the image-cache IndexedDB.
+ */
+function openImageCacheDB(): Promise<IDBDatabase> {
+  if (idbInstance) return Promise.resolve(idbInstance);
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(IDB_NAME, 1);
+    request.onerror = () => reject(request.error);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE);
+      }
+    };
+    request.onsuccess = () => {
+      idbInstance = request.result;
+      resolve(idbInstance);
+    };
+  });
+}
+
+/**
+ * Save an image (data URL, blob URL, or remote URL) into browser IndexedDB.
+ * Returns an `idb-image://{key}` identifier.
+ */
+async function saveImageToBrowserStorage(url: string, key: string): Promise<string> {
+  try {
+    let blob: Blob;
+    if (url.startsWith('data:')) {
+      // Convert data URL to Blob
+      const response = await fetch(url);
+      blob = await response.blob();
+    } else if (url.startsWith('blob:')) {
+      const response = await fetch(url);
+      blob = await response.blob();
+    } else {
+      // Remote URL - fetch and store
+      const response = await fetch(url);
+      blob = await response.blob();
+    }
+
+    const db = await openImageCacheDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(blob, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+
+    return `idb-image://${key}`;
+  } catch (error) {
+    console.error('[ImageCache] Failed to save image to IndexedDB:', error);
+    return url; // Fallback to original URL
+  }
+}
+
+/**
+ * Resolve an `idb-image://{key}` URL to an object URL for display.
+ * Returns null if not found or not an idb-image URL.
+ */
+export async function resolveIdbImageUrl(idbUrl: string): Promise<string | null> {
+  if (!idbUrl.startsWith('idb-image://')) return null;
+  const key = idbUrl.replace('idb-image://', '');
+  try {
+    const db = await openImageCacheDB();
+    const blob = await new Promise<Blob | undefined>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const request = tx.objectStore(IDB_STORE).get(key);
+      request.onsuccess = () => resolve(request.result as Blob | undefined);
+      request.onerror = () => reject(request.error);
+    });
+    if (blob) {
+      return URL.createObjectURL(blob);
+    }
+    return null;
+  } catch (error) {
+    console.error('[ImageCache] Failed to resolve idb-image:', error);
+    return null;
+  }
+}
+
+/**
+ * Delete an image from browser IndexedDB cache.
+ */
+export async function deleteIdbImage(idbUrl: string): Promise<boolean> {
+  if (!idbUrl.startsWith('idb-image://')) return false;
+  const key = idbUrl.replace('idb-image://', '');
+  try {
+    const db = await openImageCacheDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Check if running in Electron environment
  */
@@ -36,30 +143,35 @@ export const isElectron = (): boolean => {
  * @returns Local path (local-image://...) or original URL if not in Electron
  */
 export async function saveImageToLocal(
-  url: string, 
-  category: ImageCategory, 
+  url: string,
+  category: ImageCategory,
   filename: string = 'image.png'
 ): Promise<string> {
-  // If not in Electron, return original URL
-  if (!isElectron()) {
-    console.warn('Not running in Electron, image will not be saved locally');
+  // If already a persistent URL, return as-is
+  if (url.startsWith('local-image://') || url.startsWith('idb-image://')) {
     return url;
   }
 
-  try {
-    const result = await window.imageStorage!.saveImage(url, category, filename);
-    
-    if (result.success && result.localPath) {
-      console.log(`Image saved locally: ${result.localPath}`);
-      return result.localPath;
-    } else {
-      console.error('Failed to save image:', result.error);
-      return url; // Fallback to original URL
+  // Electron mode: use native file system
+  if (isElectron()) {
+    try {
+      const result = await window.imageStorage!.saveImage(url, category, filename);
+      if (result.success && result.localPath) {
+        console.log(`Image saved locally: ${result.localPath}`);
+        return result.localPath;
+      } else {
+        console.error('Failed to save image:', result.error);
+        return url;
+      }
+    } catch (error) {
+      console.error('Error saving image:', error);
+      return url;
     }
-  } catch (error) {
-    console.error('Error saving image:', error);
-    return url; // Fallback to original URL
   }
+
+  // Browser mode: save to IndexedDB
+  const key = `${category}/${filename.replace(/\.\w+$/, '')}_${Date.now()}`;
+  return saveImageToBrowserStorage(url, key);
 }
 
 /**
@@ -109,7 +221,7 @@ export async function deleteLocalImage(localPath: string): Promise<boolean> {
 
 /**
  * Read a local image as base64 (for AI API calls like video generation)
- * Works with local-image://, file://, or absolute paths
+ * Works with local-image://, idb-image://, file://, or absolute paths
  * @returns base64 data URL (e.g., "data:image/png;base64,...")
  */
 export async function readImageAsBase64(imagePath: string): Promise<string | null> {
@@ -131,6 +243,32 @@ export async function readImageAsBase64(imagePath: string): Promise<string | nul
       });
     } catch (error) {
       console.error('Error fetching remote image:', error);
+      return null;
+    }
+  }
+
+  // Browser mode: resolve idb-image:// from IndexedDB
+  if (imagePath.startsWith('idb-image://')) {
+    const key = imagePath.replace('idb-image://', '');
+    try {
+      const db = await openImageCacheDB();
+      const blob = await new Promise<Blob | undefined>((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const request = tx.objectStore(IDB_STORE).get(key);
+        request.onsuccess = () => resolve(request.result as Blob | undefined);
+        request.onerror = () => reject(request.error);
+      });
+      if (blob) {
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        });
+      }
+      return null;
+    } catch (error) {
+      console.error('Error reading idb-image as base64:', error);
       return null;
     }
   }
@@ -184,7 +322,7 @@ export async function getAbsoluteImagePath(localPath: string): Promise<string | 
  * @returns Local path (local-image://videos/...) or original URL if not in Electron
  */
 export async function saveVideoToLocal(
-  url: string, 
+  url: string,
   filename: string = 'video.mp4'
 ): Promise<string> {
   // If not in Electron or already local, return as-is
@@ -194,7 +332,7 @@ export async function saveVideoToLocal(
 
   try {
     const result = await window.imageStorage!.saveImage(url, 'videos', filename);
-    
+
     if (result.success && result.localPath) {
       console.log(`Video saved locally: ${result.localPath}`);
       return result.localPath;

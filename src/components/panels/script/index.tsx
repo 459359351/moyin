@@ -19,9 +19,9 @@ import { getFeatureConfig, getFeatureNotConfiguredMessage } from "@/lib/ai/featu
 import { useCharacterLibraryStore } from "@/stores/character-library-store";
 import { useMediaPanelStore } from "@/stores/media-panel-store";
 import { parseScript, generateShotList, generateScriptFromIdea } from "@/lib/script/script-parser";
-import { 
-  importFullScript, 
-  generateEpisodeShots, 
+import {
+  importFullScript,
+  generateEpisodeShots,
   regenerateAllEpisodeShots,
   calibrateEpisodeTitles,
   getMissingTitleEpisodes,
@@ -104,8 +104,8 @@ export function ScriptView() {
   } = useScriptStore();
 
   const { getApiKey, checkChatKeys, isFeatureConfigured } = useAPIConfigStore();
-  const { 
-    characters: allCharacters, 
+  const {
+    characters: allCharacters,
     selectCharacter: selectLibraryCharacter,
   } = useCharacterLibraryStore();
   const { setActiveTab, goToDirectorWithData, goToCharacterWithData, goToSceneWithData } = useMediaPanelStore();
@@ -115,24 +115,24 @@ export function ScriptView() {
   const [selectedItemType, setSelectedItemType] = useState<
     "character" | "scene" | "shot" | "episode" | null
   >(null);
-  
+
   // 完整剧本导入状态
   const [importStatus, setImportStatus] = useState<'idle' | 'importing' | 'ready' | 'error'>('idle');
   const [importError, setImportError] = useState<string | undefined>();
-  
+
   // AI校准状态
   const [calibrationStatus, setCalibrationStatus] = useState<'idle' | 'calibrating' | 'completed' | 'error'>('idle');
   const [missingTitleCount, setMissingTitleCount] = useState(0);
-  
+
   // 大纲生成状态
   const [synopsisStatus, setSynopsisStatus] = useState<'idle' | 'generating' | 'completed' | 'error'>('idle');
   const [missingSynopsisCount, setMissingSynopsisCount] = useState(0);
-  
+
   // 角色阶段分析状态
   const [stageAnalysisStatus, setStageAnalysisStatus] = useState<'idle' | 'analyzing' | 'completed' | 'error'>('idle');
   const [multiStageHints, setMultiStageHints] = useState<string[]>([]);
   const [suggestMultiStage, setSuggestMultiStage] = useState(false);
-  
+
   // 角色校准状态
   const [characterCalibrationStatus, setCharacterCalibrationStatus] = useState<'idle' | 'calibrating' | 'completed' | 'error'>('idle');
   const [characterCalibrationResult, setCharacterCalibrationResult] = useState<{
@@ -140,15 +140,15 @@ export function ScriptView() {
     mergedCount: number;
     finalCount: number;
   } | null>(null);
-  
+
   // 场景校准状态
   const [sceneCalibrationStatus, setSceneCalibrationStatus] = useState<'idle' | 'calibrating' | 'completed' | 'error'>('idle');
   // 视角分析状态（强制工作流）
   const [viewpointAnalysisStatus, setViewpointAnalysisStatus] = useState<'idle' | 'analyzing' | 'completed' | 'error'>('idle');
-  
+
   // 单个分镜校准状态
   const [singleShotCalibrationStatus, setSingleShotCalibrationStatus] = useState<Record<string, 'idle' | 'calibrating' | 'completed' | 'error'>>({});
-  
+
   // 二次校准追踪（中栏独立按钮触发时标记，用于进度面板区分首次/二次）
   const [secondPassTypes, setSecondPassTypes] = useState<Set<string>>(new Set());
   const addSecondPass = useCallback((type: string) => {
@@ -157,11 +157,11 @@ export function ScriptView() {
   const removeSecondPass = useCallback((type: string) => {
     setSecondPassTypes(prev => { const next = new Set(prev); next.delete(type); return next; });
   }, []);
-  
+
   // 预告片状态
-  const { 
-    setTrailerConfig, 
-    setTrailerScenes, 
+  const {
+    setTrailerConfig,
+    setTrailerScenes,
     clearTrailer,
     addScenesFromScript,
   } = useDirectorStore();
@@ -188,7 +188,7 @@ export function ScriptView() {
   const rawScript = scriptProject?.rawScript || "";
   const language = scriptProject?.language || "中文";
   const targetDuration = scriptProject?.targetDuration || "60s";
-  const styleId = scriptProject?.styleId || "2d_ghibli";
+  const styleId = scriptProject?.styleId || "2d_animation";
   const sceneCount = scriptProject?.sceneCount;
   const shotCount = scriptProject?.shotCount;
   const scriptData = scriptProject?.scriptData || null;
@@ -199,7 +199,7 @@ export function ScriptView() {
   // 优先检查新的服务映射（featureBindings），回退到旧的 checkChatKeys
   const chatConfigured = isFeatureConfigured('script_analysis') || checkChatKeys().isAllConfigured;
   const episodeRawScripts = scriptProject?.episodeRawScripts || [];
-  
+
   // 计算各集的分镜生成状态
   const episodeGenerationStatus = episodeRawScripts.reduce((acc, ep) => {
     acc[ep.episodeIndex] = ep.shotGenerationStatus;
@@ -228,22 +228,22 @@ export function ScriptView() {
     selectedItemType === "shot"
       ? shots.find((s) => s.id === selectedItemId)
       : undefined;
-  
+
   // 获取选中的集数据（包含大纲）
   const selectedEpisode = selectedItemType === "episode" && selectedItemId
     ? (() => {
-        const epIndex = parseInt(selectedItemId.replace('episode_', ''));
-        const rawScript = episodeRawScripts.find(ep => ep.episodeIndex === epIndex);
-        const epData = scriptData?.episodes.find(ep => ep.index === epIndex);
-        return rawScript && epData ? { ...epData, ...rawScript } : undefined;
-      })()
+      const epIndex = parseInt(selectedItemId.replace('episode_', ''));
+      const rawScript = episodeRawScripts.find(ep => ep.episodeIndex === epIndex);
+      const epData = scriptData?.episodes.find(ep => ep.index === epIndex);
+      return rawScript && epData ? { ...epData, ...rawScript } : undefined;
+    })()
     : undefined;
-  
+
   // 获取选中场景的所有分镜（用于多视角分析）
   const selectedSceneShots = selectedItemType === "scene" && selectedItemId
     ? shots.filter(s => s.sceneRefId === selectedItemId || s.sceneId === selectedItemId)
     : undefined;
-  
+
   // 获取选中集的所有分镜（分镜直接有 episodeId 字段）
   const selectedEpisodeShots = selectedItemType === "episode" && selectedEpisode
     ? shots.filter(shot => (shot as any).episodeId === selectedEpisode.id)
@@ -253,25 +253,25 @@ export function ScriptView() {
   const handleGenerateEpisodeShots = useCallback(async (episodeIndex: number) => {
     // 使用 feature router 获取 API 配置
     const featureConfig = getFeatureConfig('script_analysis');
-    
+
     console.log('[handleGenerateEpisodeShots] featureConfig:', featureConfig ? '已配置' : '未配置');
     console.log('[handleGenerateEpisodeShots] allApiKeys:', featureConfig?.allApiKeys?.length || 0);
-    
+
     if (!featureConfig) {
       toast.warning('未配置智谱 API，AI 视角分析将跳过');
     }
-    
+
     try {
       toast.info(`正在为第 ${episodeIndex} 集生成分镜...`);
       setViewpointAnalysisStatus('analyzing');
-      
+
       const apiKey = featureConfig?.allApiKeys?.join(',') || '';
       // 使用配置的 provider，不再硬编码
       const provider = (featureConfig?.platform === 'zhipu' ? 'zhipu' : 'openai') as string;
-      
+
       console.log('[handleGenerateEpisodeShots] apiKey length:', apiKey.length);
       console.log('[handleGenerateEpisodeShots] provider:', provider, '(from config:', featureConfig?.platform, ')');
-      
+
       const options = {
         apiKey,
         provider,
@@ -279,21 +279,21 @@ export function ScriptView() {
         styleId,
         targetDuration,
       };
-      
+
       const result = await generateEpisodeShots(
         episodeIndex,
         projectId,
         options,
         (msg) => console.log(`[ScriptView] ${msg}`)
       );
-      
+
       if (result.viewpointAnalyzed) {
         setViewpointAnalysisStatus('completed');
       } else {
         setViewpointAnalysisStatus('error');
         toast.error(`AI 视角分析未执行：${result.viewpointSkippedReason || '未知原因'}`);
       }
-      
+
       toast.success(`第 ${episodeIndex} 集分镜生成完成！共 ${result.shots.length} 个分镜`);
       return result;
     } catch (error) {
@@ -321,7 +321,7 @@ export function ScriptView() {
     try {
       // 1. 规则解析导入
       const result = await importFullScript(text, projectId);
-      
+
       if (!result.success) {
         throw new Error(result.error || "导入失败");
       }
@@ -331,14 +331,14 @@ export function ScriptView() {
       toast.success(
         `导入成功: ${result.episodes.length} 集, ${rawCharacterCount} 角色(待校准), ${result.scriptData?.scenes.length || 0} 场景`
       );
-      
+
       // 2. 校准（缺标题的集）
       const missingTitles = getMissingTitleEpisodes(projectId);
       if (missingTitles.length > 0 && hasAI) {
         setMissingTitleCount(missingTitles.length);
         toast.info(`正在为 ${missingTitles.length} 集自动生成标题...`);
         setCalibrationStatus('calibrating');
-        
+
         try {
           const calibResult = await calibrateEpisodeTitles(
             projectId,
@@ -350,7 +350,7 @@ export function ScriptView() {
             },
             (current, total, msg) => console.log(`[ScriptView] 标题校准: ${msg}`)
           );
-          
+
           if (calibResult.success) {
             setCalibrationStatus('completed');
             setMissingTitleCount(0);
@@ -361,12 +361,12 @@ export function ScriptView() {
           setCalibrationStatus('error');
         }
       }
-      
+
       // 3. 生成（每集大纲）
       if (hasAI && result.episodes.length > 0) {
         toast.info(`正在为 ${result.episodes.length} 集生成大纲...`);
         setSynopsisStatus('generating');
-        
+
         try {
           const synopsisResult = await generateEpisodeSynopses(
             projectId,
@@ -378,7 +378,7 @@ export function ScriptView() {
             },
             (current, total, msg) => console.log(`[ScriptView] 大纲生成: ${msg}`)
           );
-          
+
           if (synopsisResult.success) {
             setSynopsisStatus('completed');
             setMissingSynopsisCount(0);
@@ -389,7 +389,7 @@ export function ScriptView() {
           setSynopsisStatus('error');
         }
       }
-      
+
       // 4. 生成（第1集分镜）——此时元数据与大纲已就绪
       let viewpointResult: { viewpointAnalyzed: boolean; viewpointSkippedReason?: string } | null = null;
       if (result.episodes.length > 0) {
@@ -397,7 +397,7 @@ export function ScriptView() {
         await new Promise(resolve => setTimeout(resolve, 500));
         viewpointResult = await handleGenerateEpisodeShots(1);
       }
-      
+
       // 5. 校准（角色）
       if (hasAI && rawCharacterCount > 0 && result.scriptData && result.projectBackground) {
         // 强制工作流：AI 视角分析未执行，不进入角色校准
@@ -407,7 +407,7 @@ export function ScriptView() {
         }
         toast.info(`正在 AI 校准 ${rawCharacterCount} 个角色...`);
         setCharacterCalibrationStatus('calibrating');
-        
+
         try {
           // 统一从服务映射获取配置，不需要手动传参
           const calibResult = await calibrateCharacters(
@@ -415,11 +415,11 @@ export function ScriptView() {
             result.projectBackground,
             result.episodes
           );
-          
+
           // 转换并更新角色列表
           const sortedChars = sortByImportance(calibResult.characters);
           const newCharacters = convertToScriptCharacters(sortedChars);
-          
+
           // 从 store 获取最新的 scriptData（避免覆盖分镜生成的 AI 视角数据）
           const currentScriptData = useScriptStore.getState().projects[projectId]?.scriptData;
           if (currentScriptData) {
@@ -428,18 +428,18 @@ export function ScriptView() {
               characters: newCharacters,
             });
           }
-          
+
           setCharacterCalibrationStatus('completed');
           setCharacterCalibrationResult({
             filteredCount: calibResult.filteredWords.length,
             mergedCount: calibResult.mergeRecords.length,
             finalCount: sortedChars.length,
           });
-          
+
           toast.success(
             `角色校准完成: ${sortedChars.length} 个有效角色, 过滤 ${calibResult.filteredWords.length} 个非角色词, 合并 ${calibResult.mergeRecords.length} 组重复`
           );
-          
+
           console.log('[ScriptView] 角色校准结果:', calibResult.analysisNotes);
           if (calibResult.filteredWords.length > 0) {
             console.log('[ScriptView] 过滤的非角色词:', calibResult.filteredWords);
@@ -453,7 +453,7 @@ export function ScriptView() {
           toast.error(`角色校准失败，使用原始角色列表`);
         }
       }
-      
+
     } catch (error) {
       const err = error as Error;
       console.error("[ScriptView] Import failed:", err);
@@ -466,22 +466,22 @@ export function ScriptView() {
   // 更新全部分镜
   const handleRegenerateAllShots = useCallback(async () => {
     const featureConfig = getFeatureConfig('script_analysis');
-    
+
     if (episodeRawScripts.length === 0) {
       toast.error("没有可生成的集");
       return;
     }
-    
+
     try {
       toast.info(`正在为全部 ${episodeRawScripts.length} 集生成分镜...（可能需要较长时间）`);
-      
+
       const options = {
         apiKey: featureConfig?.allApiKeys.join(',') || '',
         provider: (featureConfig?.platform === 'zhipu' ? 'zhipu' : 'openai') as string,
         styleId,
         targetDuration,
       };
-      
+
       await regenerateAllEpisodeShots(
         projectId,
         options,
@@ -489,7 +489,7 @@ export function ScriptView() {
           console.log(`[ScriptView] ${msg} (${current}/${total})`);
         }
       );
-      
+
       toast.success(`全部 ${episodeRawScripts.length} 集分镜生成完成！`);
     } catch (error) {
       const err = error as Error;
@@ -503,7 +503,7 @@ export function ScriptView() {
     if (importStatus === 'ready' && projectId) {
       const missingTitles = getMissingTitleEpisodes(projectId);
       setMissingTitleCount(missingTitles.length);
-      
+
       const missingSynopses = getMissingSynopsisEpisodes(projectId);
       setMissingSynopsisCount(missingSynopses.length);
     }
@@ -516,16 +516,16 @@ export function ScriptView() {
       toast.error(getFeatureNotConfiguredMessage('script_analysis'));
       return;
     }
-    
+
     const missing = getMissingTitleEpisodes(projectId);
     if (missing.length === 0) {
       toast.info("所有集数都已有标题");
       return;
     }
-    
+
     setCalibrationStatus('calibrating');
     toast.info(`正在为 ${missing.length} 集生成标题...`);
-    
+
     try {
       const result = await calibrateEpisodeTitles(
         projectId,
@@ -539,7 +539,7 @@ export function ScriptView() {
           console.log(`[ScriptView] Calibration: ${msg}`);
         }
       );
-      
+
       if (result.success) {
         setCalibrationStatus('completed');
         setMissingTitleCount(result.totalMissing - result.calibratedCount);
@@ -562,11 +562,11 @@ export function ScriptView() {
       toast.error(getFeatureNotConfiguredMessage('script_analysis'));
       return;
     }
-    
+
     addSecondPass('shots');
     setViewpointAnalysisStatus('analyzing');
     toast.info(`正在校准第 ${episodeIndex} 集的分镜...`);
-    
+
     try {
       const result = await calibrateEpisodeShots(
         episodeIndex,
@@ -583,7 +583,7 @@ export function ScriptView() {
           console.log(`[ScriptView] Shot Calibration: ${msg}`);
         }
       );
-      
+
       if (result.success) {
         setViewpointAnalysisStatus('completed');
         removeSecondPass('shots');
@@ -663,19 +663,19 @@ export function ScriptView() {
       toast.error(getFeatureNotConfiguredMessage('script_analysis'));
       return;
     }
-    
+
     // 设置状态为 calibrating
     setSingleShotCalibrationStatus(prev => ({ ...prev, [shotId]: 'calibrating' }));
-    
+
     const shot = shots.find(s => s.id === shotId);
     if (!shot) {
       toast.error('找不到分镜');
       setSingleShotCalibrationStatus(prev => ({ ...prev, [shotId]: 'error' }));
       return;
     }
-    
+
     toast.info(`正在校准分镜: ${shot.actionSummary?.slice(0, 20)}...`);
-    
+
     try {
       const result = await calibrateSingleShot(
         shotId,
@@ -692,7 +692,7 @@ export function ScriptView() {
           console.log(`[ScriptView] Single Shot Calibration: ${msg}`);
         }
       );
-      
+
       if (result.success) {
         setSingleShotCalibrationStatus(prev => ({ ...prev, [shotId]: 'completed' }));
         toast.success(`分镜校准完成！`);
@@ -714,10 +714,10 @@ export function ScriptView() {
       toast.error(getFeatureNotConfiguredMessage('script_analysis'));
       return;
     }
-    
+
     setSynopsisStatus('generating');
     toast.info(`正在为 ${episodeRawScripts.length} 集生成大纲...`);
-    
+
     try {
       const result = await generateEpisodeSynopses(
         projectId,
@@ -731,7 +731,7 @@ export function ScriptView() {
           console.log(`[ScriptView] Synopsis: ${msg}`);
         }
       );
-      
+
       if (result.success) {
         setSynopsisStatus('completed');
         setMissingSynopsisCount(0);
@@ -755,39 +755,39 @@ export function ScriptView() {
       toast.error(getFeatureNotConfiguredMessage('script_analysis'));
       return;
     }
-    
+
     const background = scriptProject?.projectBackground;
-    
+
     if (!background) {
       toast.error('缺少剧本背景信息');
       return;
     }
-    
+
     // 检查 episodeRawScripts 是否存在
     if (!episodeRawScripts || episodeRawScripts.length === 0) {
       toast.error('缺少分集剧本数据，请重新导入剧本或使用新版导入功能');
       console.error('[handleCalibrateCharacters] episodeRawScripts 为空或不存在');
       return;
     }
-    
+
     // 从分集剧本中重新提取所有角色（而不是使用当前 scriptData.characters）
     const rawCharacters = extractAllCharactersFromEpisodes(episodeRawScripts);
-    
+
     if (rawCharacters.length === 0) {
       toast.error('未能从剧本中提取到角色');
       return;
     }
-    
+
     console.log('[handleCalibrateCharacters] 开始校准:', {
       rawCharacterCount: rawCharacters.length,
       episodeCount: episodeRawScripts.length,
       hasBackground: !!background,
     });
-    
+
     addSecondPass('characters');
     setCharacterCalibrationStatus('calibrating');
     toast.info(`正在 AI 校准 ${rawCharacters.length} 个原始角色...`);
-    
+
     try {
       // === 第一步：AI 校准角色 ===
       // 保留上次校准的角色，防止 AI 每次结果不一致导致角色丢失
@@ -795,8 +795,8 @@ export function ScriptView() {
         id: c.id,
         name: c.name,
         importance: (c.tags?.includes('protagonist') ? 'protagonist' :
-                     c.tags?.includes('supporting') ? 'supporting' :
-                     c.tags?.includes('minor') ? 'minor' : 'extra') as 'protagonist' | 'supporting' | 'minor' | 'extra',
+          c.tags?.includes('supporting') ? 'supporting' :
+            c.tags?.includes('minor') ? 'minor' : 'extra') as 'protagonist' | 'supporting' | 'minor' | 'extra',
         appearanceCount: 1,
         role: c.role,
         age: c.age,
@@ -808,7 +808,7 @@ export function ScriptView() {
         identityAnchors: c.identityAnchors,
         negativePrompt: c.negativePrompt,
       })) || [];
-      
+
       // 统一从服务映射获取配置，不需要手动传参
       const calibResult = await calibrateCharacters(
         rawCharacters,
@@ -816,35 +816,35 @@ export function ScriptView() {
         episodeRawScripts,
         { previousCharacters: existingCalibrated } // 只保留上次结果，防止角色丢失
       );
-      
+
       // 转换并更新角色列表（保留原始数据）
       const sortedChars = sortByImportance(calibResult.characters);
-      
+
       // 强制过滤群演角色
       const filteredChars = sortedChars.filter(c => {
         const name = c.name.toLowerCase();
         const isGroupExtra = [
-          '保安', '警察', '员工', '护士', '医生', '记者', 
+          '保安', '警察', '员工', '护士', '医生', '记者',
           '律师', '路人', '众人', '若干', '群众',
           'security', 'police', 'employee', 'nurse', 'doctor', 'reporter'
         ].some(keyword => name === keyword || name === keyword + '1' || name === keyword + '2');
         return !isGroupExtra;
       });
-      
+
       let newCharacters = convertToScriptCharacters(filteredChars, rawCharacters);
-      
+
       console.log('[ScriptView] 角色校准结果:', calibResult.analysisNotes);
-      
+
       // === 第二步：自动检测并生成多阶段角色 ===
       const totalEpisodes = episodeRawScripts.length;
       const multiStageHint = detectMultiStageHints(background.outline || '', totalEpisodes);
-      
+
       console.log('[handleCalibrateCharacters] 多阶段检测结果:', multiStageHint);
-      
+
       if (multiStageHint.suggestMultiStage) {
         toast.info('检测到多阶段角色线索，正在分析主角阶段变化...');
         setStageAnalysisStatus('analyzing');
-        
+
         try {
           console.log('[handleCalibrateCharacters] 开始 AI 分析角色阶段...');
           // 统一从服务映射获取配置，不需要手动传参
@@ -853,18 +853,18 @@ export function ScriptView() {
             newCharacters,
             totalEpisodes
           );
-          
+
           console.log('[handleCalibrateCharacters] AI 分析结果:', analyses);
-          
+
           // 统计需要多阶段的角色
           const multiStageChars = analyses.filter(a => a.needsMultiStage);
           console.log('[handleCalibrateCharacters] 需要多阶段的角色:', multiStageChars.map(c => c.characterName));
-          
+
           if (multiStageChars.length > 0) {
             // 为每个需要多阶段的角色创建阶段角色
             const newStageCharacters: import("@/types/script").ScriptCharacter[] = [];
             let stageCount = 0;
-            
+
             for (const analysis of multiStageChars) {
               // 查找基础角色
               const baseCharIndex = newCharacters.findIndex(c => c.name === analysis.characterName);
@@ -873,7 +873,7 @@ export function ScriptView() {
                 continue;
               }
               const baseChar = newCharacters[baseCharIndex];
-              
+
               // 为每个阶段创建独立的 ScriptCharacter
               const stageCharIds: string[] = [];
               for (let stageIdx = 0; stageIdx < analysis.stages.length; stageIdx++) {
@@ -881,7 +881,7 @@ export function ScriptView() {
                 // 使用索引确保 ID 唯一，避免不同角色的相同阶段名导致重复 key
                 const stageCharId = `${baseChar.id}_stage_${stageIdx}_${stage.name.replace(/\s+/g, '_')}`;
                 stageCharIds.push(stageCharId);
-                
+
                 // 创建阶段角色
                 const stageChar: import("@/types/script").ScriptCharacter = {
                   id: stageCharId,
@@ -914,11 +914,11 @@ export function ScriptView() {
                   identityAnchors: baseChar.identityAnchors,
                   negativePrompt: baseChar.negativePrompt,
                 };
-                
+
                 newStageCharacters.push(stageChar);
                 stageCount++;
               }
-              
+
               // 更新基础角色的 stageCharacterIds，并标记为索引角色（不需要单独生成形象）
               newCharacters[baseCharIndex] = {
                 ...baseChar,
@@ -928,10 +928,10 @@ export function ScriptView() {
                 tags: [...(baseChar.tags || []).filter(t => t !== 'protagonist'), '父角色'],
                 notes: `此角色有 ${stageCharIds.length} 个阶段版本，请分别为各阶段版本生成形象`,
               };
-              
+
               console.log(`[StageAnalysis] 为角色 ${analysis.characterName} 创建了 ${analysis.stages.length} 个阶段角色`);
             }
-            
+
             // 合并阶段角色到角色列表，阶段角色紧跟在其父角色后面
             const sortedCharacters: import("@/types/script").ScriptCharacter[] = [];
             for (const char of newCharacters) {
@@ -943,11 +943,11 @@ export function ScriptView() {
               }
             }
             newCharacters = sortedCharacters;
-            
+
             setStageAnalysisStatus('completed');
             setMultiStageHints(multiStageHint.hints);
             setSuggestMultiStage(false); // 已完成，不再提示
-            
+
             toast.success(`多阶段角色创建完成！为 ${multiStageChars.length} 个角色创建了 ${stageCount} 个阶段角色`);
           } else {
             setStageAnalysisStatus('completed');
@@ -959,11 +959,11 @@ export function ScriptView() {
           // 不阻止主流程，继续保存基础角色
         }
       }
-      
+
       // === 第三步：保存所有角色到 store ===
       // 【关键修复】从 store 获取最新的 scriptData，避免闭包中的 stale 数据覆盖其他字段
       const currentScriptData = useScriptStore.getState().projects[projectId]?.scriptData;
-      
+
       if (currentScriptData) {
         setScriptData(projectId, {
           ...currentScriptData,  // 使用最新 store 数据，保留 scenes.viewpoints 等
@@ -973,7 +973,7 @@ export function ScriptView() {
       } else {
         console.error('[handleCalibrateCharacters] currentScriptData 为空，无法保存！');
       }
-      
+
       setCharacterCalibrationStatus('completed');
       removeSecondPass('characters');
       setCharacterCalibrationResult({
@@ -981,11 +981,11 @@ export function ScriptView() {
         mergedCount: calibResult.mergeRecords.length,
         finalCount: newCharacters.length,
       });
-      
+
       toast.success(
         `角色校准完成: ${newCharacters.length} 个角色`
       );
-      
+
       if (calibResult.filteredWords.length > 0) {
         console.log('[ScriptView] 过滤的非角色词:', calibResult.filteredWords);
       }
@@ -1016,7 +1016,7 @@ export function ScriptView() {
       );
       setMultiStageHints(result.hints);
       setSuggestMultiStage(result.suggestMultiStage);
-      
+
       if (result.suggestMultiStage) {
         console.log('[ScriptView] 检测到多阶段角色线索:', result.hints);
       }
@@ -1046,7 +1046,7 @@ export function ScriptView() {
       const provider = featureConfig.platform === 'zhipu' ? 'zhipu' : 'openai';
       const baseUrl = featureConfig.baseUrl?.replace(/\/+$/, '');
       const model = featureConfig.models?.[0];
-      
+
       if (!baseUrl || !model) {
         toast.error('请先在设置中配置「剧本分析」的 Base URL 和模型');
         setParseStatus(projectId, "error", "缺少 Base URL 或模型配置");
@@ -1075,7 +1075,7 @@ export function ScriptView() {
 
       // 第二步：自动调用导入流程（复用导入的所有后续逻辑）
       await handleImportFullScript(generatedScript);
-      
+
     } catch (error) {
       const err = error as Error;
       console.error("[ScriptView] Script generation failed:", err);
@@ -1104,7 +1104,7 @@ export function ScriptView() {
       // Pass all API keys (comma-separated) for rotation
       const allKeysString = featureConfig.allApiKeys.join(',');
       const provider = featureConfig.platform === 'zhipu' ? 'zhipu' : 'openai';
-      
+
       console.log(`[ScriptView] Parsing with ${featureConfig.allApiKeys.length} API keys`);
 
       const baseUrl = featureConfig.baseUrl?.replace(/\/+$/, '');
@@ -1174,7 +1174,7 @@ export function ScriptView() {
       }
 
       setShotStatus(projectId, "generating");
-      
+
       // Clear existing shots and prepare for streaming updates
       setShots(projectId, []);
       let accumulatedShots: import("@/types/script").Shot[] = [];
@@ -1183,7 +1183,7 @@ export function ScriptView() {
         // Pass all API keys for rotation
         const allKeysString = featureConfig.allApiKeys.join(',');
         const provider = featureConfig.platform === 'zhipu' ? 'zhipu' : 'openai';
-        
+
         console.log(`[ScriptView] Generating shots with ${featureConfig.allApiKeys.length} API keys`);
 
         // Build character descriptions from library if available
@@ -1206,12 +1206,12 @@ export function ScriptView() {
             id: `shot-${accumulatedShots.length + idx + 1}`,
             index: accumulatedShots.length + idx + 1,
           }));
-          
+
           accumulatedShots = [...accumulatedShots, ...reindexedShots];
-          
+
           // Update UI immediately
           setShots(projectId, [...accumulatedShots]);
-          
+
           console.log(`[ScriptView] 场景 ${sceneIndex + 1} 完成，已生成 ${accumulatedShots.length} 个分镜`);
         };
 
@@ -1290,7 +1290,7 @@ export function ScriptView() {
       // 传递角色数据到角色库生成控制台（包含世界级大师生成的视觉提示词）
       // 获取剧本元数据中的年代信息
       const background = scriptProject?.projectBackground;
-      
+
       goToCharacterWithData({
         name: character.name,
         gender: character.gender,
@@ -1598,7 +1598,7 @@ export function ScriptView() {
         message: '请先配置 AI 接口',
       };
     }
-    
+
     const background = scriptProject?.projectBackground;
     if (!background) {
       return {
@@ -1607,9 +1607,9 @@ export function ScriptView() {
         message: '请先导入剧本',
       };
     }
-    
+
     const existingCharacters = scriptData?.characters || [];
-    
+
     try {
       const result = await findCharacterByDescription(
         query,
@@ -1622,7 +1622,7 @@ export function ScriptView() {
           baseUrl: featureConfig.baseUrl,
         }
       );
-      
+
       return {
         found: result.found,
         name: result.name,
@@ -1648,7 +1648,7 @@ export function ScriptView() {
         message: '请先配置 AI 接口',
       };
     }
-    
+
     const background = scriptProject?.projectBackground;
     if (!background) {
       return {
@@ -1656,9 +1656,9 @@ export function ScriptView() {
         message: '请先导入剧本',
       };
     }
-    
+
     const existingScenes = scriptData?.scenes || [];
-    
+
     try {
       const result = await findSceneByDescription(
         query,
@@ -1671,7 +1671,7 @@ export function ScriptView() {
           baseUrl: featureConfig.baseUrl,
         }
       );
-      
+
       return {
         found: result.found,
         message: result.message,
@@ -1693,24 +1693,24 @@ export function ScriptView() {
       toast.error(getFeatureNotConfiguredMessage('script_analysis'));
       return;
     }
-    
+
     const background = scriptProject?.projectBackground;
     if (!background) {
       toast.error('请先导入剧本');
       return;
     }
-    
+
     if (!episodeRawScripts || episodeRawScripts.length === 0) {
       toast.error('缺少分集剧本数据');
       return;
     }
-    
+
     const currentScenes = scriptData?.scenes || [];
-    
+
     addSecondPass('scenes');
     setSceneCalibrationStatus('calibrating');
     toast.info(`正在 AI 校准 ${currentScenes.length} 个场景...`);
-    
+
     try {
       const result = await calibrateScenes(
         currentScenes,
@@ -1722,18 +1722,18 @@ export function ScriptView() {
           baseUrl: featureConfig.baseUrl,
         }
       );
-      
+
       // 【轻量级模式】只更新美术设计字段，完全保留 viewpoints 和场景顺序
       // calibrateScenes 已经按 currentScenes 的顺序返回，只需合并美术字段
       const newScenes = currentScenes.map((orig, i) => {
         // 找到校准结果中对应的场景
         const calibrated = result.scenes.find(cs => cs.id === orig.id);
-        
+
         if (!calibrated) {
           console.log(`[handleCalibrateScenes] 场景 #${i + 1} "${orig.name}" 未找到校准结果，保持原样`);
           return orig;
         }
-        
+
         // 【关键】只更新美术设计字段，保留所有原有数据（包括 viewpoints）
         return {
           ...orig,  // 保留所有原有字段（id, name, location, viewpoints, sceneIds 等）
@@ -1752,9 +1752,9 @@ export function ScriptView() {
           // viewpoints 保持不变（已通过 ...orig 保留）
         };
       });
-      
+
       console.log('[handleCalibrateScenes] 轻量级校准完成：场景数保持', newScenes.length, '，顺序不变');
-      
+
       // 更新 scriptData（不需要更新 episodes 和 shots，因为 sceneId 不变）
       if (scriptData) {
         setScriptData(projectId, {
@@ -1762,11 +1762,11 @@ export function ScriptView() {
           scenes: newScenes,
         });
       }
-      
+
       setSceneCalibrationStatus('completed');
       removeSecondPass('scenes');
       toast.success(`场景校准完成！${result.analysisNotes}`);
-      
+
       // 显示合并建议（不自动执行）
       if (result.mergeRecords.length > 0) {
         console.log('[handleCalibrateScenes] 合并建议:', result.mergeRecords);
@@ -1788,19 +1788,19 @@ export function ScriptView() {
       toast.error(getFeatureNotConfiguredMessage('script_analysis'));
       return;
     }
-    
+
     const background = scriptProject?.projectBackground;
     if (!background) {
       toast.error('请先导入剧本');
       return;
     }
-    
+
     const currentScenes = scriptData?.scenes || [];
-    
+
     addSecondPass('scenes');
     setSceneCalibrationStatus('calibrating');
     toast.info(`正在 AI 校准第 ${episodeIndex} 集的场景...`);
-    
+
     try {
       const result = await calibrateEpisodeScenes(
         episodeIndex,
@@ -1813,22 +1813,22 @@ export function ScriptView() {
           baseUrl: featureConfig.baseUrl,
         }
       );
-      
+
       // 转换并更新场景列表（只更新该集的场景）
       const newCalibratedScenes = convertToScriptScenes(result.scenes, currentScenes);
-      
+
       // 合并：保留其他集的场景，替换该集的场景
       const calibratedIds = new Set(newCalibratedScenes.map(s => s.id));
       const otherScenes = currentScenes.filter(s => !calibratedIds.has(s.id));
       const mergedScenes = [...otherScenes, ...newCalibratedScenes];
-      
+
       if (scriptData) {
         setScriptData(projectId, {
           ...scriptData,
           scenes: mergedScenes,
         });
       }
-      
+
       setSceneCalibrationStatus('completed');
       removeSecondPass('scenes');
       toast.success(`第 ${episodeIndex} 集场景校准完成！`);
@@ -1848,14 +1848,14 @@ export function ScriptView() {
       toast.error(getFeatureNotConfiguredMessage('script_analysis'));
       return;
     }
-    
+
     if (shots.length === 0) {
       toast.error('请先生成分镜');
       return;
     }
-    
+
     const background = scriptProject?.projectBackground || null;
-    
+
     // 设置生成状态
     setTrailerConfig({
       duration,
@@ -1864,9 +1864,9 @@ export function ScriptView() {
       generatedAt: undefined,
       error: undefined,
     });
-    
+
     toast.info(`正在 AI 挑选 ${duration} 秒预告片分镜...`);
-    
+
     try {
       const result = await selectTrailerShots(
         shots,
@@ -1878,21 +1878,21 @@ export function ScriptView() {
           baseUrl: featureConfig.baseUrl,
         }
       );
-      
+
       if (result.success) {
         // 计算新分镜的起始 ID
         // 重要：必须使用 directorProject 的最新快照，而不是 useCallback 缓存的值
         const latestSplitScenes = directorProject?.splitScenes || [];
-        const startId = latestSplitScenes.length > 0 
-          ? Math.max(...latestSplitScenes.map(s => s.id)) + 1 
+        const startId = latestSplitScenes.length > 0
+          ? Math.max(...latestSplitScenes.map(s => s.id)) + 1
           : 1;
-        
+
         console.log('[handleGenerateTrailer] startId calculation:', {
           latestSplitScenesLength: latestSplitScenes.length,
           latestIds: latestSplitScenes.map(s => s.id),
           calculatedStartId: startId,
         });
-        
+
         // 将挑选的 Shot 转换为 addScenesFromScript 需要的格式，并追加到 splitScenes
         const scenesToAdd = result.selectedShots.map((shot, idx) => ({
           promptZh: shot.visualDescription || shot.actionSummary || `预告片分镜`,
@@ -1938,15 +1938,15 @@ export function ScriptView() {
           focalLength: shot.focalLength,
           photographyTechnique: shot.photographyTechnique,
         }));
-        
+
         // 追加到 splitScenes
         addScenesFromScript(scenesToAdd);
-        
+
         // 保存原始 Shot 的 ID（用于剧本面板显示）
         const originalShotIds = result.selectedShots.map(s => s.id);
-        
+
         console.log('[handleGenerateTrailer] originalShotIds:', originalShotIds);
-        
+
         // 更新 trailerConfig，保存原始 Shot ID
         setTrailerConfig({
           duration,
@@ -1955,7 +1955,7 @@ export function ScriptView() {
           generatedAt: Date.now(),
           error: result.error,
         });
-        
+
         toast.success(`已挑选 ${result.selectedShots.length} 个分镜用于预告片，可在 AI 导演面板编辑`);
         if (result.error) {
           toast.warning(result.error);
@@ -1983,13 +1983,13 @@ export function ScriptView() {
       toast.error(`预告片生成失败: ${err.message}`);
     }
   }, [shots, scriptProject?.projectBackground, setTrailerConfig, addScenesFromScript, directorProject]);
-  
+
   // 清除预告片
   const handleClearTrailer = useCallback(() => {
     clearTrailer();
     toast.success('预告片已清除');
   }, [clearTrailer]);
-  
+
   // 获取预告片 API 配置
   const trailerApiOptions = useCallback((): TrailerGenerationOptions | null => {
     const featureConfig = getFeatureConfig('script_analysis');
@@ -2014,10 +2014,10 @@ export function ScriptView() {
             {parseStatus === "parsing"
               ? "解析中..."
               : scriptProject?.shotStatus === "generating"
-              ? "分镜生成中..."
-              : parseStatus === "ready" && scriptData
-              ? `${scriptData.title}`
-              : ""}
+                ? "分镜生成中..."
+                : parseStatus === "ready" && scriptData
+                  ? `${scriptData.title}`
+                  : ""}
           </span>
         </div>
       </div>

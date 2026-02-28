@@ -42,11 +42,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useMediaPanelStore } from "@/stores/media-panel-store";
-import { 
-  validateSceneCount, 
+import {
+  validateSceneCount,
   SCENE_LIMITS,
   type AspectRatio,
-  type Resolution 
+  type Resolution
 } from "@/lib/storyboard/grid-calculator";
 import { uploadMultipleImages } from "@/lib/utils/image-upload";
 import { VISUAL_STYLE_PRESETS, getStyleTokens, getStylesByCategory, type VisualStyleId } from "@/lib/constants/visual-styles";
@@ -86,7 +86,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
   const [images, setImages] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sceneCount, setSceneCount] = useState<number>(4);
-  const [styleId, setStyleId] = useState<StyleId>("ghibli");
+  const [styleId, setStyleId] = useState<StyleId>("2d_animation");
   const [selectedCharacters, setSelectedCharacters] = useState<DraggedCharacter[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isCharacterPopoverOpen, setIsCharacterPopoverOpen] = useState(false);
@@ -224,7 +224,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
   // Toggle character selection from popover
   const toggleCharacterSelection = (character: Character) => {
     const isSelected = selectedCharacters.some(c => c.characterId === character.id);
-    
+
     if (isSelected) {
       setSelectedCharacters(prev => prev.filter(c => c.characterId !== character.id));
     } else {
@@ -261,7 +261,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
   // Will be uploaded to get HTTP URLs before API call
   const getCharacterReferenceImages = (): string[] => {
     const refImages: string[] = [];
-    
+
     for (const selectedChar of selectedCharacters) {
       // Find full character data from store
       const fullChar = visibleCharacters.find(c => c.id === selectedChar.characterId);
@@ -274,7 +274,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
         }
       }
     }
-    
+
     return refImages;
   };
 
@@ -301,7 +301,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
     // If onGenerateStoryboard is provided, use new storyboard workflow
     if (onGenerateStoryboard) {
       setIsSubmitting(true);
-      
+
       try {
         const actualStyleTokens = getSelectedStyleTokens();
         const rawCharacterImages = getCharacterReferenceImages();
@@ -357,7 +357,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
 
     // Update config with selected style tokens, aspect ratio, resolution and character reference images
     const characterReferenceImages = getCharacterReferenceImages();
-    updateConfig({ 
+    updateConfig({
       styleTokens: [...actualStyleTokens],
       characterReferenceImages,
       aspectRatio,
@@ -371,11 +371,11 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
     try {
       // Initialize worker and generate screenplay
       const bridge = await initializeWorkerBridge();
-      
+
       // Get API key and provider
       const chatApiKey = getApiKey('memefast');
       const chatProvider = 'memefast';
-      
+
       const screenplay = await bridge.generateScreenplay(fullPrompt, images, {
         aspectRatio,
         resolution,
@@ -388,7 +388,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
 
       // DirectorStore will be updated via onScreenplayGenerated callback
       useDirectorStore.getState().onScreenplayGenerated(screenplay);
-      
+
       toast.success("剧本生成成功！");
     } catch (error) {
       const err = error as Error;
@@ -561,17 +561,16 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
             </span>
           )}
         </div>
-        
+
         <div
           ref={dropZoneRef}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          className={`min-h-[60px] border-2 border-dashed rounded-lg p-2 transition-colors ${
-            isDragOver 
-              ? "border-primary bg-primary/10" 
+          className={`min-h-[60px] border-2 border-dashed rounded-lg p-2 transition-colors ${isDragOver
+              ? "border-primary bg-primary/10"
               : "border-muted-foreground/20 hover:border-muted-foreground/40"
-          }`}
+            }`}
         >
           {selectedCharacters.length === 0 ? (
             <Popover open={isCharacterPopoverOpen} onOpenChange={setIsCharacterPopoverOpen}>
@@ -601,7 +600,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
                     {visibleCharacters.map((char: Character) => {
                       const isSelected = selectedCharacters.some(c => c.characterId === char.id);
                       const thumbnail = char.views.length > 0 ? char.views[0].imageUrl : undefined;
-                      
+
                       return (
                         <button
                           key={char.id}
@@ -609,8 +608,8 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
                           className="w-full flex items-center gap-2 p-2 hover:bg-muted transition-colors text-left"
                         >
                           {thumbnail ? (
-                            <img 
-                              src={thumbnail} 
+                            <img
+                              src={thumbnail}
                               alt={char.name}
                               className="w-8 h-8 rounded-full object-cover"
                             />
@@ -633,13 +632,13 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
           ) : (
             <div className="flex flex-wrap gap-2 items-center">
               {selectedCharacters.map((char) => (
-                <div 
+                <div
                   key={char.characterId}
                   className="flex items-center gap-2 bg-muted rounded-full pl-1 pr-2 py-1"
                 >
                   {char.thumbnailUrl ? (
-                    <img 
-                      src={char.thumbnailUrl} 
+                    <img
+                      src={char.thumbnailUrl}
                       alt={char.characterName}
                       className="w-6 h-6 rounded-full object-cover"
                     />
@@ -685,7 +684,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
                       {visibleCharacters.map((char: Character) => {
                         const isSelected = selectedCharacters.some(c => c.characterId === char.id);
                         const thumbnail = char.views.length > 0 ? char.views[0].imageUrl : undefined;
-                        
+
                         return (
                           <button
                             key={char.id}
@@ -693,8 +692,8 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
                             className="w-full flex items-center gap-2 p-2 hover:bg-muted transition-colors text-left"
                           >
                             {thumbnail ? (
-                              <img 
-                                src={thumbnail} 
+                              <img
+                                src={thumbnail}
                                 alt={char.name}
                                 className="w-8 h-8 rounded-full object-cover"
                               />

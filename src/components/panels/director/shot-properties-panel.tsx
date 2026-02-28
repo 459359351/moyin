@@ -10,6 +10,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { useResolvedImageUrl } from "@/hooks/use-resolved-image-url";
 import { useScriptStore, useActiveScriptProject } from "@/stores/script-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useCharacterLibraryStore, type Character } from "@/stores/character-library-store";
@@ -97,8 +98,12 @@ export function ShotPropertiesPanel({
   // Get keyframes
   const startKf = selectedShot?.keyframes?.find((k) => k.type === "start");
   const endKf = selectedShot?.keyframes?.find((k) => k.type === "end");
-  const hasStartImage = !!(startKf?.imageUrl || selectedShot?.imageUrl);
-  const hasEndImage = !!endKf?.imageUrl;
+  const rawStartImage = startKf?.imageUrl || selectedShot?.imageUrl || '';
+  const rawEndImage = endKf?.imageUrl || '';
+  const resolvedStartImage = useResolvedImageUrl(rawStartImage);
+  const resolvedEndImage = useResolvedImageUrl(rawEndImage);
+  const hasStartImage = !!rawStartImage;
+  const hasEndImage = !!rawEndImage;
   const hasVideo = !!(selectedShot?.videoUrl || selectedShot?.interval?.videoUrl);
 
   // Angle switch state
@@ -445,7 +450,7 @@ export function ShotPropertiesPanel({
                   </span>
                 )}
               </div>
-              
+
               {/* Visual description (detailed) */}
               {selectedShot.visualDescription && (
                 <div className="space-y-1">
@@ -458,10 +463,10 @@ export function ShotPropertiesPanel({
                   </p>
                 </div>
               )}
-              
+
               {/* Action summary */}
               <p className="text-xs leading-relaxed">{selectedShot.actionSummary}</p>
-              
+
               {/* Dialogue */}
               {selectedShot.dialogue && (
                 <div className="flex gap-1.5 text-xs text-primary/80 italic bg-blue-50 dark:bg-blue-950/30 rounded p-1.5">
@@ -565,9 +570,9 @@ export function ShotPropertiesPanel({
                 onClick={() => handlePreviewFrame("start")}
               >
                 <div className="aspect-video bg-muted relative">
-                  {hasStartImage ? (
+                  {hasStartImage && resolvedStartImage ? (
                     <img
-                      src={startKf?.imageUrl || selectedShot.imageUrl}
+                      src={resolvedStartImage}
                       className="w-full h-full object-cover"
                     />
                   ) : (
@@ -626,7 +631,7 @@ export function ShotPropertiesPanel({
               >
                 <div className="aspect-video bg-muted relative">
                   {hasEndImage ? (
-                    <img src={endKf!.imageUrl} className="w-full h-full object-cover" />
+                    <img src={resolvedEndImage || ''} className="w-full h-full object-cover" />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center">
                       <span className="text-[9px] text-muted-foreground/50">可选</span>
@@ -695,7 +700,7 @@ export function ShotPropertiesPanel({
                 {hasVideo ? (
                   <>
                     <img
-                      src={startKf?.imageUrl || selectedShot.imageUrl}
+                      src={resolvedStartImage || ''}
                       className="w-full h-full object-cover"
                     />
                     <div className="absolute inset-0 flex items-center justify-center bg-black/30">

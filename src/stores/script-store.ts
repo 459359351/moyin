@@ -89,7 +89,7 @@ const defaultProjectData = (): ScriptProjectData => ({
   rawScript: "",
   language: "中文",
   targetDuration: "60s",
-  styleId: "2d_ghibli",
+  styleId: "2d_animation",
   sceneCount: undefined,
   shotCount: undefined,
   scriptData: null,
@@ -650,16 +650,16 @@ export const useScriptStore = create<ScriptStore>()(
       },
       merge: (persisted: any, current: any) => {
         if (!persisted) return current;
-        
+
         // Legacy format: has `projects` as Record (from old monolithic file)
         if (persisted.projects && typeof persisted.projects === 'object') {
           return { ...current, ...persisted };
         }
-        
+
         // New per-project format: has `projectData` for single project
         const { activeProjectId: pid, projectData } = persisted;
         if (!pid || !projectData) return current;
-        
+
         return {
           ...current,
           activeProjectId: pid,

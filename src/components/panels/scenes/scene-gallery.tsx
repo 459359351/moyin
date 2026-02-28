@@ -8,7 +8,7 @@
  * Folder navigation, breadcrumb, and scene card grid
  */
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   useSceneStore,
   type Scene,
@@ -38,7 +38,17 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   FolderPlus,
   Folder,
   ChevronRight,
@@ -87,6 +97,7 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
   const [newFolderName, setNewFolderName] = useState("");
   const [renamingFolder, setRenamingFolder] = useState<SceneFolder | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'folder' | 'scene'; id: string; name: string } | null>(null);
 
   const visibleFolders = useMemo(() => {
     if (resourceSharing.shareScenes) return folders;
@@ -101,7 +112,7 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
   }, [scenes, resourceSharing.shareScenes, activeProjectId]);
 
   // Current folder's subfolders
-  const subFolders = useMemo(() => 
+  const subFolders = useMemo(() =>
     visibleFolders.filter(f => f.parentId === currentFolderId),
     [visibleFolders, currentFolderId]
   );
@@ -111,15 +122,15 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
     let items = visibleScenes.filter(s => s.folderId === currentFolderId);
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      items = items.filter(s => 
+      items = items.filter(s =>
         s.name.toLowerCase().includes(query) ||
         s.location?.toLowerCase().includes(query)
       );
     }
-    
+
     // 根场景：没有 parentSceneId 的场景
     const roots = items.filter(s => !s.parentSceneId);
-    
+
     // 构建父子关系映射（支持多层嵌套）
     const childMap = new Map<string, Scene[]>();
     items.forEach(s => {
@@ -129,10 +140,10 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
         childMap.set(s.parentSceneId, children);
       }
     });
-    
+
     return { rootScenes: roots, childScenesMap: childMap };
   }, [visibleScenes, currentFolderId, searchQuery]);
-  
+
   // 计算每个场景的子场景数量（递归计算所有后代）
   const getDescendantCount = (sceneId: string): number => {
     const children = childScenesMap.get(sceneId) || [];
@@ -142,10 +153,10 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
     }
     return count;
   };
-  
+
   // 展开/收起状态
   const [expandedScenes, setExpandedScenes] = useState<Set<string>>(new Set());
-  
+
   const toggleExpand = (sceneId: string) => {
     const newExpanded = new Set(expandedScenes);
     if (newExpanded.has(sceneId)) {
@@ -155,7 +166,7 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
     }
     setExpandedScenes(newExpanded);
   };
-  
+
   // 递归构建场景树列表（平铺但带缩进层级）
   const buildSceneTree = (parentScenes: Scene[], depth: number = 0): Array<{ scene: Scene; depth: number }> => {
     const result: Array<{ scene: Scene; depth: number }> = [];
@@ -171,7 +182,7 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
     }
     return result;
   };
-  
+
   // 最终显示的场景列表（带层级）
   const currentScenes = useMemo(() => {
     return buildSceneTree(rootScenes);
@@ -222,21 +233,28 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
   };
 
   const handleDeleteFolder = (id: string) => {
-    if (confirm("确定要删除此文件夹吗？文件夹内的场景将移动到上级目录。")) {
-      deleteFolder(id);
-      toast.success("文件夹已删除");
-    }
+    const folder = getFolderById(id);
+    setDeleteTarget({ type: 'folder', id, name: folder?.name || '此文件夹' });
   };
 
   const handleDeleteScene = (scene: Scene) => {
-    if (confirm(`确定要删除场景 "${scene.name}" 吗？`)) {
-      deleteScene(scene.id);
-      if (selectedSceneId === scene.id) {
+    setDeleteTarget({ type: 'scene', id: scene.id, name: scene.name });
+  };
+
+  const confirmDelete = useCallback(() => {
+    if (!deleteTarget) return;
+    if (deleteTarget.type === 'folder') {
+      deleteFolder(deleteTarget.id);
+      toast.success("文件夹已删除");
+    } else {
+      deleteScene(deleteTarget.id);
+      if (selectedSceneId === deleteTarget.id) {
         onSceneSelect(null);
       }
       toast.success("场景已删除");
     }
-  };
+    setDeleteTarget(null);
+  }, [deleteTarget, deleteFolder, deleteScene, selectedSceneId, onSceneSelect]);
 
   const handleSceneClick = (scene: Scene) => {
     if (selectedSceneId === scene.id) {
@@ -326,8 +344,8 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
           <div className="mb-4">
             <div className="text-xs text-muted-foreground mb-2">文件夹</div>
             <div className={cn(
-              viewMode === "grid" 
-                ? "grid grid-cols-3 gap-2" 
+              viewMode === "grid"
+                ? "grid grid-cols-3 gap-2"
                 : "space-y-1"
             )}>
               {subFolders.map((folder) => (
@@ -372,15 +390,15 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
               场景 ({rootScenes.length})
             </div>
             <div className={cn(
-              viewMode === "grid" 
-                ? "grid grid-cols-2 gap-2" 
+              viewMode === "grid"
+                ? "grid grid-cols-2 gap-2"
                 : "space-y-1"
             )}>
               {currentScenes.map(({ scene, depth }) => {
                 const childCount = getDescendantCount(scene.id);
                 const isExpanded = expandedScenes.has(scene.id);
                 const hasChildren = childCount > 0;
-                
+
                 return (
                   <SceneContextMenu
                     key={scene.id}
@@ -468,6 +486,31 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteTarget?.type === 'folder' ? '删除文件夹' : '删除场景'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.type === 'folder'
+                ? `确定要删除文件夹 "${deleteTarget?.name}" 吗？文件夹内的场景将移动到上级目录。`
+                : `确定要删除场景 "${deleteTarget?.name}" 吗？此操作无法撤销。`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -500,7 +543,7 @@ function SceneCard({
   // Use referenceImage first, fall back to contactSheetImage for parent scenes
   const displayImage = scene.referenceImage || (scene as any).contactSheetImage || undefined;
   const resolvedImage = useResolvedImageUrl(displayImage);
-  
+
   // 根据层级计算缩进
   const indentStyle = { marginLeft: `${depth * 20}px` };
 
@@ -524,8 +567,8 @@ function SceneCard({
       >
         <div className="aspect-video rounded bg-muted flex items-center justify-center overflow-hidden mb-2 relative">
           {displayImage ? (
-            <img 
-              src={resolvedImage || ''} 
+            <img
+              src={resolvedImage || ''}
               alt={scene.name}
               className="w-full h-full object-cover"
             />
@@ -602,11 +645,11 @@ function SceneCard({
       ) : (
         <div className="w-4" /> // 占位
       )}
-      
+
       <div className="w-16 h-10 rounded bg-muted flex items-center justify-center overflow-hidden flex-shrink-0 relative">
         {displayImage ? (
-          <img 
-            src={resolvedImage || ''} 
+          <img
+            src={resolvedImage || ''}
             alt={scene.name}
             className="w-full h-full object-cover"
           />

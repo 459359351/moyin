@@ -5,12 +5,14 @@
 
 /**
  * LocalImage Component
- * Handles displaying images that may be stored locally (local-image://) or remotely
+ * Handles displaying images that may be stored locally (local-image://) or in IndexedDB (idb-image://)
  * The local-image:// protocol is handled by Electron's custom protocol handler
+ * The idb-image:// protocol is resolved via IndexedDB in browser mode
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { resolveIdbImageUrl } from "@/lib/image-storage";
 
 interface LocalImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   src: string;
@@ -19,25 +21,52 @@ interface LocalImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
 
 export function LocalImage({ src, fallback, className, alt, ...props }: LocalImageProps) {
   const [error, setError] = useState(false);
-  const [currentSrc, setCurrentSrc] = useState(src);
+  const [resolvedSrc, setResolvedSrc] = useState<string | null>(
+    src.startsWith('idb-image://') ? null : src
+  );
+
+  // Resolve idb-image:// URLs to object URLs
+  useEffect(() => {
+    if (!src.startsWith('idb-image://')) {
+      setResolvedSrc(src);
+      setError(false);
+      return;
+    }
+
+    let revoked = false;
+    resolveIdbImageUrl(src).then((objectUrl) => {
+      if (revoked) {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        return;
+      }
+      if (objectUrl) {
+        setResolvedSrc(objectUrl);
+        setError(false);
+      } else {
+        setResolvedSrc(null);
+        setError(true);
+      }
+    });
+
+    return () => {
+      revoked = true;
+      // Note: we don't revoke here because the img tag might still be using it
+      // The browser will clean up when the object URL is no longer referenced
+    };
+  }, [src]);
 
   const handleError = () => {
     if (!error && fallback) {
       setError(true);
-      setCurrentSrc(fallback);
+      setResolvedSrc(fallback);
     } else {
       setError(true);
     }
   };
 
-  // Reset error state when src changes
-  if (src !== currentSrc && !error) {
-    setCurrentSrc(src);
-  }
-
-  if (error && !fallback) {
+  if ((error && !fallback) || (!resolvedSrc && !src.startsWith('idb-image://'))) {
     return (
-      <div 
+      <div
         className={cn(
           "flex items-center justify-center bg-muted text-muted-foreground text-xs",
           className
@@ -49,9 +78,24 @@ export function LocalImage({ src, fallback, className, alt, ...props }: LocalIma
     );
   }
 
+  // Still loading idb-image
+  if (!resolvedSrc) {
+    return (
+      <div
+        className={cn(
+          "flex items-center justify-center bg-muted text-muted-foreground text-xs animate-pulse",
+          className
+        )}
+        style={props.style}
+      >
+        加载中...
+      </div>
+    );
+  }
+
   return (
     <img
-      src={currentSrc}
+      src={resolvedSrc}
       alt={alt}
       className={className}
       onError={handleError}

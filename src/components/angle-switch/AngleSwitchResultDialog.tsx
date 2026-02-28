@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Check, X, RotateCw, Download } from "lucide-react";
+import { useResolvedImageUrl } from "@/hooks/use-resolved-image-url";
 
 export interface AngleSwitchResult {
   originalImage: string;
@@ -54,6 +55,9 @@ export function AngleSwitchResultDialog({
   onRegenerate,
   onPreviewInCenter,
 }: AngleSwitchResultDialogProps) {
+  // Resolve idb-image:// URLs — must be called before any early returns
+  const resolvedOriginalImage = useResolvedImageUrl(result?.originalImage || '');
+
   if (!result) return null;
 
   const currentImage = selectedHistoryIndex >= 0 && history[selectedHistoryIndex]
@@ -102,7 +106,7 @@ export function AngleSwitchResultDialog({
               <div className="text-xs text-muted-foreground mb-1">原图</div>
               <div className="aspect-video bg-muted rounded overflow-hidden border-2 border-border">
                 <img
-                  src={result.originalImage}
+                  src={resolvedOriginalImage || result.originalImage}
                   alt="原图"
                   className="w-full h-full object-cover"
                 />
@@ -132,11 +136,10 @@ export function AngleSwitchResultDialog({
                   <button
                     key={item.timestamp}
                     onClick={() => onSelectHistory?.(index)}
-                    className={`shrink-0 w-32 aspect-video rounded overflow-hidden border-2 transition-all ${
-                      selectedHistoryIndex === index
+                    className={`shrink-0 w-32 aspect-video rounded overflow-hidden border-2 transition-all ${selectedHistoryIndex === index
                         ? "border-primary ring-2 ring-primary ring-offset-1"
                         : "border-border hover:border-primary/50"
-                    }`}
+                      }`}
                   >
                     <img
                       src={item.imageUrl}
@@ -151,8 +154,8 @@ export function AngleSwitchResultDialog({
         </div>
 
         <DialogFooter className="gap-2">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size="sm"
             onClick={() => handleDownload(result.newImage, `angle-switch-${Date.now()}.png`)}
           >

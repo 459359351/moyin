@@ -36,15 +36,15 @@ export async function processReferenceImages(urls: string[], maxCount: number = 
     else if (url.startsWith('data:image/') && url.includes(';base64,')) {
       processedRefs.push(url);
     }
-    // Local image path - convert to base64
-    else if (url.startsWith('local-image://')) {
+    // Local or IDB image path - convert to base64
+    else if (url.startsWith('local-image://') || url.startsWith('idb-image://')) {
       try {
         const base64 = await readImageAsBase64(url);
         if (base64 && base64.startsWith('data:image/') && base64.includes(';base64,')) {
           processedRefs.push(base64);
         }
       } catch (e) {
-        console.warn('[ImageGen] Failed to read local image:', url, e);
+        console.warn('[ImageGen] Failed to read local/idb image:', url, e);
       }
     }
   }
@@ -60,7 +60,7 @@ export function getImageApiConfig() {
 export function getCharacterReferenceImages(characterIds: string[]): string[] {
   const { characters } = useCharacterLibraryStore.getState();
   const refs: string[] = [];
-  
+
   for (const charId of characterIds) {
     const char = characters.find(c => c.id === charId);
     if (char) {
@@ -73,7 +73,7 @@ export function getCharacterReferenceImages(characterIds: string[]): string[] {
       }
     }
   }
-  
+
   return refs;
 }
 
@@ -128,7 +128,7 @@ export async function callImageGenerationApi(
   if (taskId) {
     const pollInterval = 2000;
     const maxAttempts = 60;
-    
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const progress = Math.min(Math.floor((attempt / maxAttempts) * 100), 99);
       onProgress?.(progress);
@@ -162,7 +162,7 @@ export async function callImageGenerationApi(
         imageUrl = imageUrl || normalizeUrl(statusData.output_url) || normalizeUrl(statusData.result_url) || normalizeUrl(statusData.url);
 
         if (!imageUrl) throw new Error('任务完成但没有图片 URL');
-        
+
         const httpUrl = imageUrl;
         let finalImageUrl = imageUrl;
         try {
@@ -212,7 +212,7 @@ export function allocateAngles(count: number, preselected: (string | undefined)[
     'High Angle (Vulnerable)': 1,
     'Dutch Angle (Tilted)': 0,
   };
-  
+
   const normalize = (s?: string) => (s || '').toLowerCase();
   for (let i = 0; i < count; i++) {
     const u = normalize(preselected[i]);
@@ -228,7 +228,7 @@ export function allocateAngles(count: number, preselected: (string | undefined)[
       quotas[matched] = Math.max(0, (quotas[matched] || 0) - 1);
     }
   }
-  
+
   const fillOrder: Angle[] = [
     'Over-the-Shoulder (OTS)', 'POV', 'Back View',
     'Low Angle (Heroic)', 'High Angle (Vulnerable)', 'Dutch Angle (Tilted)'
@@ -253,21 +253,21 @@ export function buildAnchorPhrase(styleTokens?: string[]): string {
   return `${style}Keep character appearance, wardrobe and facial features consistent. Keep lighting and color grading consistent. ${noTextConstraint}`;
 }
 
-export function composeTilePrompt(scene: SplitScene, angle: Angle, aspect: '16:9'|'9:16', styleTokens?: string[]): string {
+export function composeTilePrompt(scene: SplitScene, angle: Angle, aspect: '16:9' | '9:16', styleTokens?: string[]): string {
   const base = scene.imagePromptZh?.trim() || scene.imagePrompt?.trim() || scene.videoPromptZh?.trim() || scene.videoPrompt?.trim() || '';
   const shot = allowedShotFromSize(scene.shotSize);
   const vertical = aspect === '9:16' ? 'vertical composition, tighter framing, avoid letterboxing, ' : '';
   const cameraPart = `${angle}, ${shot}`;
   const anchor = buildAnchorPhrase(styleTokens);
   const style = styleTokens && styleTokens.length > 0 ? ` Style: ${styleTokens.join(', ')}` : '';
-  
+
   const charCount = scene.characterIds?.length || 0;
-  const charCountPhrase = charCount === 0 
-    ? 'NO human figures in this frame, empty scene or environment only.' 
-    : charCount === 1 
+  const charCountPhrase = charCount === 0
+    ? 'NO human figures in this frame, empty scene or environment only.'
+    : charCount === 1
       ? 'EXACTLY ONE person in frame, single character only, do NOT duplicate the character.'
       : `EXACTLY ${charCount} distinct people in frame, no more no less, each person appears only ONCE.`;
-  
+
   const prompt = `${cameraPart}, ${vertical}${charCountPhrase} ${base}. ${anchor}.${style}`.replace(/\s+/g, ' ').trim();
   return prompt;
 }
@@ -276,7 +276,7 @@ export function composeTilePrompt(scene: SplitScene, angle: Angle, aspect: '16:9
 export async function sliceGridImage(gridImageUrl: string, count: number): Promise<string[]> {
   const cols = 3;
   const rows = Math.ceil(count / cols);
-  
+
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -284,7 +284,7 @@ export async function sliceGridImage(gridImageUrl: string, count: number): Promi
       const tileW = Math.floor(img.width / cols);
       const tileH = Math.floor(img.height / rows);
       const results: string[] = [];
-      
+
       for (let i = 0; i < count; i++) {
         const row = Math.floor(i / cols);
         const col = i % cols;
@@ -310,11 +310,11 @@ export function buildGridPrompt(
 ): string {
   const cols = 3;
   const rows = Math.ceil(scenes.length / cols);
-  
+
   const gridPromptParts: string[] = [];
   gridPromptParts.push(`Generate a ${rows}x${cols} grid image with ${scenes.length} panels, each panel separated by thin white lines.`);
   gridPromptParts.push(`Layout: ${rows} rows, ${cols} columns, reading order left-to-right, top-to-bottom.`);
-  
+
   scenes.forEach((s, idx) => {
     const row = Math.floor(idx / cols) + 1;
     const col = (idx % cols) + 1;
@@ -325,19 +325,19 @@ export function buildGridPrompt(
       desc = s.imagePromptZh?.trim() || s.imagePrompt?.trim() || s.videoPromptZh?.trim() || s.videoPrompt?.trim() || `scene ${idx + 1}`;
     }
     const charCount = s.characterIds?.length || 0;
-    const charConstraint = charCount === 0 
-      ? '(no people)' 
-      : charCount === 1 
-        ? '(exactly 1 person, do NOT duplicate)' 
+    const charConstraint = charCount === 0
+      ? '(no people)'
+      : charCount === 1
+        ? '(exactly 1 person, do NOT duplicate)'
         : `(exactly ${charCount} distinct people, each appears once)`;
     gridPromptParts.push(`Panel [row ${row}, col ${col}] ${charConstraint}: ${desc}`);
   });
-  
+
   if (styleTokens.length > 0) {
     gridPromptParts.push(`Style for all panels: ${styleTokens.join(', ')}`);
   }
   gridPromptParts.push('Keep consistent character appearance, lighting, and color grading across all panels.');
   gridPromptParts.push('CRITICAL: NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS, NO SPEECH BUBBLES, NO DIALOGUE BOXES, NO SUBTITLES in any panel.');
-  
+
   return gridPromptParts.join(' ');
 }

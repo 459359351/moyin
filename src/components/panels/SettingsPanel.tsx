@@ -60,6 +60,16 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { uploadToImageHost } from "@/lib/image-host";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // Platform icon mapping
 const PLATFORM_ICONS: Record<string, React.ReactNode> = {
@@ -110,6 +120,7 @@ export function SettingsPanel() {
   const [cacheSize, setCacheSize] = useState(0);
   const [isCacheLoading, setIsCacheLoading] = useState(false);
   const [isClearingCache, setIsClearingCache] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{ type: 'import' | 'link'; dir: string; message: string } | null>(null);
 
   // Toggle provider expansion
   const toggleExpanded = (id: string) => {
@@ -189,7 +200,7 @@ export function SettingsPanel() {
             taskId: "test-connection-check",
           }),
         });
-        
+
         // For RunningHub, 400/404 means auth is OK (task doesn't exist)
         if (response.status === 400 || response.status === 404) {
           setTestResults((prev) => ({ ...prev, [provider.id]: true }));
@@ -279,7 +290,7 @@ export function SettingsPanel() {
           setStoragePaths({ basePath: paths.basePath });
         }
       })
-      .catch(() => {});
+      .catch(() => { });
     refreshCacheSize();
   }, [hasStorageManager, refreshCacheSize, setStoragePaths]);
 
@@ -297,7 +308,7 @@ export function SettingsPanel() {
       assignCharactersToProject(activeProjectId);
     }
     // Rehydrate to load/unload other projects' data
-    try { await useCharacterLibraryStore.persist.rehydrate(); } catch {}
+    try { await useCharacterLibraryStore.persist.rehydrate(); } catch { }
   };
 
   const handleToggleShareScenes = async (checked: boolean) => {
@@ -305,7 +316,7 @@ export function SettingsPanel() {
     if (!checked && activeProjectId) {
       assignScenesToProject(activeProjectId);
     }
-    try { await useSceneStore.persist.rehydrate(); } catch {}
+    try { await useSceneStore.persist.rehydrate(); } catch { }
   };
 
   const handleToggleShareMedia = async (checked: boolean) => {
@@ -313,7 +324,7 @@ export function SettingsPanel() {
     if (!checked && activeProjectId) {
       assignMediaToProject(activeProjectId);
     }
-    try { await useMediaStore.persist.rehydrate(); } catch {}
+    try { await useMediaStore.persist.rehydrate(); } catch { }
   };
 
   // Unified storage handlers
@@ -349,15 +360,19 @@ export function SettingsPanel() {
     if (!window.storageManager) return;
     const dir = await window.storageManager.selectDirectory();
     if (!dir) return;
-    if (!confirm("导入将覆盖当前数据，是否继续？")) return;
+    setPendingAction({ type: 'import', dir, message: '导入将覆盖当前数据，是否继续？' });
+  };
+
+  const executeImportData = async (dir: string) => {
+    if (!window.storageManager) return;
     const result = await window.storageManager.importData(dir);
     if (result.success) {
       // 清除 localStorage 中的缓存，防止旧数据覆盖导入的数据
-      const keysToRemove = Object.keys(localStorage).filter(key => 
+      const keysToRemove = Object.keys(localStorage).filter(key =>
         key.startsWith('moyin-') || key.includes('store')
       );
       keysToRemove.forEach(key => localStorage.removeItem(key));
-      
+
       // 清除 IndexedDB 缓存
       try {
         const dbRequest = indexedDB.open('moyin-creator-db', 1);
@@ -371,7 +386,7 @@ export function SettingsPanel() {
       } catch (e) {
         console.warn('Failed to clear IndexedDB:', e);
       }
-      
+
       toast.success("数据已导入，正在刷新...");
       // 延迟刷新页面以确保缓存清理完成
       setTimeout(() => window.location.reload(), 500);
@@ -387,28 +402,30 @@ export function SettingsPanel() {
     }
     const dir = await window.storageManager.selectDirectory();
     if (!dir) return;
-    
+
     // Validate the directory first
     const validation = await window.storageManager.validateDataDir(dir);
     if (!validation.valid) {
       toast.error(validation.error || "无效的数据目录");
       return;
     }
-    
-    // Confirm with user
+
     const confirmMsg = `检测到 ${validation.projectCount || 0} 个项目文件，${validation.mediaCount || 0} 个素材文件。\n\n是否指向此目录？操作后建议重启应用。`;
-    if (!confirm(confirmMsg)) return;
-    
+    setPendingAction({ type: 'link', dir, message: confirmMsg });
+  };
+
+  const executeLinkData = async (dir: string) => {
+    if (!window.storageManager) return;
     const result = await window.storageManager.linkData(dir);
     if (result.success) {
       setStoragePaths({ basePath: result.path || dir });
-      
+
       // 清除 localStorage 中的缓存，确保从新路径加载数据
-      const keysToRemove = Object.keys(localStorage).filter(key => 
+      const keysToRemove = Object.keys(localStorage).filter(key =>
         key.startsWith('moyin-') || key.includes('store')
       );
       keysToRemove.forEach(key => localStorage.removeItem(key));
-      
+
       // 清除 IndexedDB 缓存
       try {
         const dbRequest = indexedDB.open('moyin-creator-db', 1);
@@ -422,7 +439,7 @@ export function SettingsPanel() {
       } catch (e) {
         console.warn('Failed to clear IndexedDB:', e);
       }
-      
+
       toast.success("已指向数据目录，正在刷新...");
       setTimeout(() => window.location.reload(), 500);
     } else {
@@ -468,22 +485,22 @@ export function SettingsPanel() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
         <div className="border-b border-border px-6">
           <TabsList className="h-12 bg-transparent p-0 gap-4">
-            <TabsTrigger 
-              value="api" 
+            <TabsTrigger
+              value="api"
               className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 h-12"
             >
               <Key className="h-4 w-4 mr-2" />
               API 管理
             </TabsTrigger>
-            <TabsTrigger 
-              value="advanced" 
+            <TabsTrigger
+              value="advanced"
               className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 h-12"
             >
               <Layers className="h-4 w-4 mr-2" />
               高级选项
             </TabsTrigger>
-            <TabsTrigger 
-              value="imagehost" 
+            <TabsTrigger
+              value="imagehost"
               className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 h-12"
             >
               <Upload className="h-4 w-4 mr-2" />
@@ -492,8 +509,8 @@ export function SettingsPanel() {
                 <span className="ml-1 w-2 h-2 bg-green-500 rounded-full" />
               )}
             </TabsTrigger>
-            <TabsTrigger 
-              value="storage" 
+            <TabsTrigger
+              value="storage"
               className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 h-12"
             >
               <HardDrive className="h-4 w-4 mr-2" />
@@ -506,321 +523,321 @@ export function SettingsPanel() {
         <TabsContent value="api" className="flex-1 overflow-hidden mt-0">
           <ScrollArea className="h-full">
             <div className="p-8 max-w-5xl mx-auto space-y-8">
-          {/* Security Notice */}
-          <div className="flex items-start gap-3 p-4 bg-muted/50 border border-border rounded-lg">
-            <Shield className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-            <div>
-              <h3 className="font-medium text-foreground text-sm">安全说明</h3>
-              <p className="text-xs text-muted-foreground mt-1">
-                所有 API Key 仅存储在您的浏览器本地存储中，不会上传到任何服务器。支持多 Key 轮换，失败时自动切换。
-              </p>
-            </div>
-          </div>
+              {/* Security Notice */}
+              <div className="flex items-start gap-3 p-4 bg-muted/50 border border-border rounded-lg">
+                <Shield className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+                <div>
+                  <h3 className="font-medium text-foreground text-sm">安全说明</h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    所有 API Key 仅存储在您的浏览器本地存储中，不会上传到任何服务器。支持多 Key 轮换，失败时自动切换。
+                  </p>
+                </div>
+              </div>
 
-          {/* MemeFast 购买引导 */}
-          <a
-            href="https://361api.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-3 p-4 bg-gradient-to-r from-orange-500/5 to-primary/5 border border-orange-500/20 rounded-lg hover:border-orange-500/40 transition-colors group"
-          >
-            <div className="p-2 rounded-lg bg-orange-500/10 text-orange-500 shrink-0">
-              <Zap className="h-5 w-5" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-medium text-foreground text-sm flex items-center gap-2">
-                魔片API
-                <span className="text-[10px] px-1.5 py-0.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded">
-                  推荐
+              {/* MemeFast 购买引导 */}
+              <a
+                href="https://361api.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 p-4 bg-gradient-to-r from-orange-500/5 to-primary/5 border border-orange-500/20 rounded-lg hover:border-orange-500/40 transition-colors group"
+              >
+                <div className="p-2 rounded-lg bg-orange-500/10 text-orange-500 shrink-0">
+                  <Zap className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-medium text-foreground text-sm flex items-center gap-2">
+                    魔片API
+                    <span className="text-[10px] px-1.5 py-0.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded">
+                      推荐
+                    </span>
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    543+ AI 模型一站式接入，支持 GPT / Claude / Gemini / DeepSeek / Sora 等
+                  </p>
+                </div>
+                <span className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-primary group-hover:underline">
+                  获取 API Key
+                  <ExternalLink className="h-3.5 w-3.5" />
                 </span>
-              </h3>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                543+ AI 模型一站式接入，支持 GPT / Claude / Gemini / DeepSeek / Sora 等
-              </p>
-            </div>
-            <span className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-primary group-hover:underline">
-              获取 API Key
-              <ExternalLink className="h-3.5 w-3.5" />
-            </span>
-          </a>
+              </a>
 
-          {/* Provider List */}
-          <div className="space-y-4">
-            {/* <h3 className="font-bold text-foreground flex items-center gap-2">
+              {/* Provider List */}
+              <div className="space-y-4">
+                {/* <h3 className="font-bold text-foreground flex items-center gap-2">
               <Key className="h-4 w-4" />
               API 供应商
             </h3> */}
 
-            {providers.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 border border-dashed border-border rounded-xl">
-                <Info className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-medium text-foreground mb-2">
-                  尚未配置任何供应商
-                </h3>
-                <p className="text-sm text-muted-foreground mb-2">
-                  推荐使用魔片API，支持 500+ 模型一站式接入
-                </p>
-                <a
-                  href="https://361api.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline mb-4"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  前往魔片API获取 Key
-                </a>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {providers.map((provider) => {
-                  const isExpanded = expandedProviders[provider.id] ?? false;
-                  const keyCount = getApiKeyCount(provider.apiKey);
-                  const configured = keyCount > 0;
-                  const testResult = testResults[provider.id];
-                  const isTesting = testingProvider === provider.id;
-
-                  return (
-                    <Collapsible
-                      key={provider.id}
-                      open={isExpanded}
-                      onOpenChange={() => toggleExpanded(provider.id)}
+                {providers.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 border border-dashed border-border rounded-xl">
+                    <Info className="h-12 w-12 text-muted-foreground mb-4" />
+                    <h3 className="text-lg font-medium text-foreground mb-2">
+                      尚未配置任何供应商
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      推荐使用魔片API，支持 500+ 模型一站式接入
+                    </p>
+                    <a
+                      href="https://361api.com/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline mb-4"
                     >
-                      <div
-                        className={cn(
-                          "border rounded-xl transition-all",
-                          configured
-                            ? "bg-card border-primary/30"
-                            : "bg-card border-border"
-                        )}
-                      >
-                        {/* Header */}
-                        <CollapsibleTrigger asChild>
-                          <div className="w-full flex items-center justify-between p-4 hover:bg-muted/30 rounded-t-xl transition-colors">
-                            <div className="flex items-center gap-3">
-                              <div
-                                className={cn(
-                                  "p-2 rounded-lg",
-                                  configured
-                                    ? "bg-primary/10 text-primary"
-                                    : "bg-muted text-muted-foreground"
-                                )}
-                              >
-                                {PLATFORM_ICONS[provider.platform] || (
-                                  <Settings className="h-5 w-5" />
-                                )}
-                              </div>
-                              <div className="text-left">
-                                <h4 className="font-medium text-foreground flex items-center gap-2">
-                                  {provider.name}
-                                  {provider.platform === 'memefast' && (
-                                    <span className="text-[10px] px-1.5 py-0.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded font-normal">
-                                      推荐
-                                    </span>
-                                  )}
-                                  {configured && (
-                                    <span className="text-[10px] px-1.5 py-0.5 bg-primary/10 text-primary rounded font-normal">
-                                      已配置
-                                    </span>
-                                  )}
-                                </h4>
-                                <p className="text-xs text-muted-foreground">
-                                  {provider.platform}
-                                </p>
-                              </div>
-                            </div>
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      前往魔片API获取 Key
+                    </a>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {providers.map((provider) => {
+                      const isExpanded = expandedProviders[provider.id] ?? false;
+                      const keyCount = getApiKeyCount(provider.apiKey);
+                      const configured = keyCount > 0;
+                      const testResult = testResults[provider.id];
+                      const isTesting = testingProvider === provider.id;
 
-                            <div className="flex items-center gap-4">
-                              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                                <span
-                                  className="cursor-pointer hover:text-foreground"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleExpanded(provider.id);
-                                  }}
-                                >
-                                  模型 ({provider.model.length})
-                                </span>
-                                <span>|</span>
-                                <span
-                                  className="cursor-pointer hover:text-foreground"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleEdit(provider);
-                                  }}
-                                >
-                                  Key ({keyCount})
-                                </span>
-                              </div>
-
-                              <div
-                                className="flex items-center gap-1"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8"
-                                  title="同步模型列表"
-                                  onClick={async () => {
-                                    setSyncingProvider(provider.id);
-                                    const result = await syncProviderModels(provider.id);
-                                    setSyncingProvider(null);
-                                    if (result.success) {
-                                      toast.success(`已同步 ${result.count} 个模型`);
-                                    } else {
-                                      toast.error(result.error || '同步失败');
-                                    }
-                                  }}
-                                  disabled={!configured || syncingProvider === provider.id}
-                                >
-                                  {syncingProvider === provider.id ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <RefreshCw className="h-4 w-4" />
-                                  )}
-                                </Button>
-
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8"
-                                  title="测试连接"
-                                  onClick={() => testConnection(provider)}
-                                  disabled={!configured || isTesting}
-                                >
-                                  {isTesting ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : testResult === true ? (
-                                    <Check className="h-4 w-4 text-green-500" />
-                                  ) : testResult === false ? (
-                                    <X className="h-4 w-4 text-red-500" />
-                                  ) : (
-                                    <Shield className="h-4 w-4" />
-                                  )}
-                                </Button>
-
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8"
-                                  title="编辑"
-                                  onClick={() => handleEdit(provider)}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-
-                              </div>
-
-                              {isExpanded ? (
-                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                              )}
-                            </div>
-                          </div>
-                        </CollapsibleTrigger>
-
-                        {/* MemeFast 购买引导 */}
-                        {provider.platform === 'memefast' && !configured && (
-                          <div className="px-4 pb-2">
-                            <a
-                              href="https://361api.com/"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-                            >
-                              <ExternalLink className="h-3 w-3" />
-                              前往魔片API获取 Key →
-                            </a>
-                          </div>
-                        )}
-
-                        {/* Expandable Content */}
-                        <CollapsibleContent>
-                          <div className="px-4 pb-4 space-y-3 border-t border-border/50 pt-3">
-                            {/* Base URL */}
-                            {provider.baseUrl && (
-                              <div className="text-xs">
-                                <span className="text-muted-foreground">
-                                  Base URL:{" "}
-                                </span>
-                                <span className="font-mono text-foreground">
-                                  {provider.baseUrl}
-                                </span>
-                              </div>
+                      return (
+                        <Collapsible
+                          key={provider.id}
+                          open={isExpanded}
+                          onOpenChange={() => toggleExpanded(provider.id)}
+                        >
+                          <div
+                            className={cn(
+                              "border rounded-xl transition-all",
+                              configured
+                                ? "bg-card border-primary/30"
+                                : "bg-card border-border"
                             )}
-
-                            {/* Models */}
-                            {provider.model.length > 0 && (
-                              <div className="flex flex-wrap gap-2">
-                                {provider.model.map((m) => (
-                                  <span
-                                    key={m}
-                                    className="text-xs px-2 py-1 bg-muted rounded font-mono"
+                          >
+                            {/* Header */}
+                            <CollapsibleTrigger asChild>
+                              <div className="w-full flex items-center justify-between p-4 hover:bg-muted/30 rounded-t-xl transition-colors">
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className={cn(
+                                      "p-2 rounded-lg",
+                                      configured
+                                        ? "bg-primary/10 text-primary"
+                                        : "bg-muted text-muted-foreground"
+                                    )}
                                   >
-                                    {m}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
+                                    {PLATFORM_ICONS[provider.platform] || (
+                                      <Settings className="h-5 w-5" />
+                                    )}
+                                  </div>
+                                  <div className="text-left">
+                                    <h4 className="font-medium text-foreground flex items-center gap-2">
+                                      {provider.name}
+                                      {provider.platform === 'memefast' && (
+                                        <span className="text-[10px] px-1.5 py-0.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded font-normal">
+                                          推荐
+                                        </span>
+                                      )}
+                                      {configured && (
+                                        <span className="text-[10px] px-1.5 py-0.5 bg-primary/10 text-primary rounded font-normal">
+                                          已配置
+                                        </span>
+                                      )}
+                                    </h4>
+                                    <p className="text-xs text-muted-foreground">
+                                      {provider.platform}
+                                    </p>
+                                  </div>
+                                </div>
 
-                            {/* API Key Preview */}
-                            {configured && (
-                              <div className="text-xs">
-                                <span className="text-muted-foreground">
-                                  API Key:{" "}
-                                </span>
-                                <span className="font-mono text-foreground">
-                                  {maskApiKey(parseApiKeys(provider.apiKey)[0])}
-                                  {keyCount > 1 && (
-                                    <span className="text-muted-foreground">
-                                      {" "}
-                                      (+{keyCount - 1} 个)
+                                <div className="flex items-center gap-4">
+                                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                                    <span
+                                      className="cursor-pointer hover:text-foreground"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleExpanded(provider.id);
+                                      }}
+                                    >
+                                      模型 ({provider.model.length})
                                     </span>
+                                    <span>|</span>
+                                    <span
+                                      className="cursor-pointer hover:text-foreground"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleEdit(provider);
+                                      }}
+                                    >
+                                      Key ({keyCount})
+                                    </span>
+                                  </div>
+
+                                  <div
+                                    className="flex items-center gap-1"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      title="同步模型列表"
+                                      onClick={async () => {
+                                        setSyncingProvider(provider.id);
+                                        const result = await syncProviderModels(provider.id);
+                                        setSyncingProvider(null);
+                                        if (result.success) {
+                                          toast.success(`已同步 ${result.count} 个模型`);
+                                        } else {
+                                          toast.error(result.error || '同步失败');
+                                        }
+                                      }}
+                                      disabled={!configured || syncingProvider === provider.id}
+                                    >
+                                      {syncingProvider === provider.id ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <RefreshCw className="h-4 w-4" />
+                                      )}
+                                    </Button>
+
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      title="测试连接"
+                                      onClick={() => testConnection(provider)}
+                                      disabled={!configured || isTesting}
+                                    >
+                                      {isTesting ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : testResult === true ? (
+                                        <Check className="h-4 w-4 text-green-500" />
+                                      ) : testResult === false ? (
+                                        <X className="h-4 w-4 text-red-500" />
+                                      ) : (
+                                        <Shield className="h-4 w-4" />
+                                      )}
+                                    </Button>
+
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      title="编辑"
+                                      onClick={() => handleEdit(provider)}
+                                    >
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+
+                                  </div>
+
+                                  {isExpanded ? (
+                                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
                                   )}
-                                </span>
+                                </div>
+                              </div>
+                            </CollapsibleTrigger>
+
+                            {/* MemeFast 购买引导 */}
+                            {provider.platform === 'memefast' && !configured && (
+                              <div className="px-4 pb-2">
+                                <a
+                                  href="https://361api.com/"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                  前往魔片API获取 Key →
+                                </a>
                               </div>
                             )}
+
+                            {/* Expandable Content */}
+                            <CollapsibleContent>
+                              <div className="px-4 pb-4 space-y-3 border-t border-border/50 pt-3">
+                                {/* Base URL */}
+                                {provider.baseUrl && (
+                                  <div className="text-xs">
+                                    <span className="text-muted-foreground">
+                                      Base URL:{" "}
+                                    </span>
+                                    <span className="font-mono text-foreground">
+                                      {provider.baseUrl}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* Models */}
+                                {provider.model.length > 0 && (
+                                  <div className="flex flex-wrap gap-2">
+                                    {provider.model.map((m) => (
+                                      <span
+                                        key={m}
+                                        className="text-xs px-2 py-1 bg-muted rounded font-mono"
+                                      >
+                                        {m}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* API Key Preview */}
+                                {configured && (
+                                  <div className="text-xs">
+                                    <span className="text-muted-foreground">
+                                      API Key:{" "}
+                                    </span>
+                                    <span className="font-mono text-foreground">
+                                      {maskApiKey(parseApiKeys(provider.apiKey)[0])}
+                                      {keyCount > 1 && (
+                                        <span className="text-muted-foreground">
+                                          {" "}
+                                          (+{keyCount - 1} 个)
+                                        </span>
+                                      )}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </CollapsibleContent>
                           </div>
-                        </CollapsibleContent>
-                      </div>
-                    </Collapsible>
-                  );
-                })}
+                        </Collapsible>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          {/* Feature Binding */}
-          <FeatureBindingPanel />
+              {/* Feature Binding */}
+              <FeatureBindingPanel />
 
-          {/* Global Settings */}
-          <div className="p-6 border border-border rounded-xl bg-card space-y-6">
-            <h3 className="font-bold text-foreground flex items-center gap-2">
-              <Settings className="h-4 w-4" />
-              全局设置
-            </h3>
+              {/* Global Settings */}
+              <div className="p-6 border border-border rounded-xl bg-card space-y-6">
+                <h3 className="font-bold text-foreground flex items-center gap-2">
+                  <Settings className="h-4 w-4" />
+                  全局设置
+                </h3>
 
-            {/* Concurrency */}
-            <div className="space-y-3">
-              <Label className="text-xs text-muted-foreground">并发生成数</Label>
-              <div className="flex items-center gap-3">
-                <Input
-                  type="number"
-                  min={1}
-                  value={concurrency}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (val >= 1) setConcurrency(val);
-                  }}
-                  className="w-24"
-                />
-                <span className="text-xs text-muted-foreground">
-                  同时生成的任务数量（多 Key 时可设置更高，建议不超过 Key 数量）
-                </span>
+                {/* Concurrency */}
+                <div className="space-y-3">
+                  <Label className="text-xs text-muted-foreground">并发生成数</Label>
+                  <div className="flex items-center gap-3">
+                    <Input
+                      type="number"
+                      min={1}
+                      value={concurrency}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        if (val >= 1) setConcurrency(val);
+                      }}
+                      className="w-24"
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      同时生成的任务数量（多 Key 时可设置更高，建议不超过 Key 数量）
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
 
               {/* About */}
               <div className="text-center py-8 text-muted-foreground border-t border-border">
@@ -846,8 +863,8 @@ export function SettingsPanel() {
                     这些选项影响 AI 导演板块的视频生成行为
                   </p>
                 </div>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="sm"
                   onClick={() => {
                     resetAdvancedOptions();
@@ -1237,10 +1254,10 @@ export function SettingsPanel() {
                 </p>
 
                 <div className="space-y-3">
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={handleLinkData} 
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleLinkData}
                     disabled={!hasStorageManager}
                     className="w-full"
                   >
@@ -1357,12 +1374,44 @@ export function SettingsPanel() {
         onSubmit={addImageHostProvider}
       />
 
+
       <EditImageHostDialog
         open={imageHostEditOpen}
         onOpenChange={setImageHostEditOpen}
         provider={editingImageHost}
         onSave={updateImageHostProvider}
       />
+
+      {/* Import/Link confirmation dialog */}
+      <AlertDialog open={!!pendingAction} onOpenChange={(open) => !open && setPendingAction(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingAction?.type === 'import' ? '导入数据' : '指向数据目录'}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-wrap">
+              {pendingAction?.message}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!pendingAction) return;
+                const { type, dir } = pendingAction;
+                setPendingAction(null);
+                if (type === 'import') {
+                  executeImportData(dir);
+                } else {
+                  executeLinkData(dir);
+                }
+              }}
+            >
+              确认
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

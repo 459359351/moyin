@@ -8,8 +8,9 @@
  * Folder navigation, breadcrumb, and character card grid
  */
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useCharacterLibraryStore, type Character, type CharacterFolder } from "@/stores/character-library-store";
+import { LocalImage } from "@/components/ui/local-image";
 import { useAppSettingsStore } from "@/stores/app-settings-store";
 import { useProjectStore } from "@/stores/project-store";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,17 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { 
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
+import {
   FolderPlus,
   Folder,
   ChevronRight,
@@ -79,6 +90,7 @@ export function CharacterGallery({ onCharacterSelect, selectedCharacterId }: Cha
   const [newFolderName, setNewFolderName] = useState("");
   const [renamingFolder, setRenamingFolder] = useState<CharacterFolder | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<{ type: "character" | "folder"; id: string; name: string } | null>(null);
 
   const visibleFolders = useMemo(() => {
     if (resourceSharing.shareCharacters) return folders;
@@ -93,7 +105,7 @@ export function CharacterGallery({ onCharacterSelect, selectedCharacterId }: Cha
   }, [characters, resourceSharing.shareCharacters, activeProjectId]);
 
   // Current folder's subfolders
-  const subFolders = useMemo(() => 
+  const subFolders = useMemo(() =>
     visibleFolders.filter(f => f.parentId === currentFolderId),
     [visibleFolders, currentFolderId]
   );
@@ -103,7 +115,7 @@ export function CharacterGallery({ onCharacterSelect, selectedCharacterId }: Cha
     let chars = visibleCharacters.filter(c => c.folderId === currentFolderId);
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      chars = chars.filter(c => 
+      chars = chars.filter(c =>
         c.name.toLowerCase().includes(query) ||
         c.description?.toLowerCase().includes(query)
       );
@@ -155,21 +167,27 @@ export function CharacterGallery({ onCharacterSelect, selectedCharacterId }: Cha
     toast.success("文件夹已重命名");
   };
 
-  const handleDeleteFolder = (id: string) => {
-    if (confirm("确定要删除此文件夹吗？文件夹内的角色将移动到上级目录。")) {
-      deleteFolder(id);
-      toast.success("文件夹已删除");
-    }
+  const handleDeleteFolder = (folder: CharacterFolder) => {
+    setDeleteTarget({ type: "folder", id: folder.id, name: folder.name });
   };
 
   const handleDeleteCharacter = (char: Character) => {
-    if (confirm(`确定要删除角色 "${char.name}" 吗？`)) {
-      deleteCharacter(char.id);
-      if (selectedCharacterId === char.id) {
+    setDeleteTarget({ type: "character", id: char.id, name: char.name });
+  };
+
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    if (deleteTarget.type === "character") {
+      deleteCharacter(deleteTarget.id);
+      if (selectedCharacterId === deleteTarget.id) {
         onCharacterSelect(null);
       }
       toast.success("角色已删除");
+    } else {
+      deleteFolder(deleteTarget.id);
+      toast.success("文件夹已删除");
     }
+    setDeleteTarget(null);
   };
 
   const handleCharacterClick = (char: Character) => {
@@ -260,8 +278,8 @@ export function CharacterGallery({ onCharacterSelect, selectedCharacterId }: Cha
           <div className="mb-4">
             <div className="text-xs text-muted-foreground mb-2">文件夹</div>
             <div className={cn(
-              viewMode === "grid" 
-                ? "grid grid-cols-3 gap-2" 
+              viewMode === "grid"
+                ? "grid grid-cols-3 gap-2"
                 : "space-y-1"
             )}>
               {subFolders.map((folder) => (
@@ -272,7 +290,7 @@ export function CharacterGallery({ onCharacterSelect, selectedCharacterId }: Cha
                     setRenamingFolder(folder);
                     setRenameValue(folder.name);
                   }}
-                  onDelete={() => handleDeleteFolder(folder.id)}
+                  onDelete={() => handleDeleteFolder(folder)}
                 >
                   <div
                     className={cn(
@@ -306,8 +324,8 @@ export function CharacterGallery({ onCharacterSelect, selectedCharacterId }: Cha
               角色 ({currentCharacters.length})
             </div>
             <div className={cn(
-              viewMode === "grid" 
-                ? "grid grid-cols-3 gap-2" 
+              viewMode === "grid"
+                ? "grid grid-cols-3 gap-2"
                 : "space-y-1"
             )}>
               {currentCharacters.map((char) => (
@@ -335,8 +353,8 @@ export function CharacterGallery({ onCharacterSelect, selectedCharacterId }: Cha
                         {/* Grid view */}
                         <div className="aspect-square rounded bg-muted flex items-center justify-center overflow-hidden mb-2">
                           {char.thumbnailUrl ? (
-                            <img 
-                              src={char.thumbnailUrl} 
+                            <LocalImage
+                              src={char.thumbnailUrl}
                               alt={char.name}
                               className="w-full h-full object-cover"
                             />
@@ -356,8 +374,8 @@ export function CharacterGallery({ onCharacterSelect, selectedCharacterId }: Cha
                         {/* List view */}
                         <div className="w-10 h-10 rounded bg-muted flex items-center justify-center overflow-hidden flex-shrink-0">
                           {char.thumbnailUrl ? (
-                            <img 
-                              src={char.thumbnailUrl} 
+                            <LocalImage
+                              src={char.thumbnailUrl}
                               alt={char.name}
                               className="w-full h-full object-cover"
                             />
@@ -442,6 +460,24 @@ export function CharacterGallery({ onCharacterSelect, selectedCharacterId }: Cha
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.type === "character"
+                ? `确定要删除角色「${deleteTarget?.name}」吗？此操作不可撤销。`
+                : `确定要删除文件夹「${deleteTarget?.name}」吗？文件夹内的角色将移动到上级目录。`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -232,14 +232,15 @@ async function generateImage(
   fallbackFeature?: 'character_generation'
 ): Promise<ImageGenerationResult> {
   let resolvedFeature = feature;
-  let featureConfig = getFeatureConfig(feature);
+  // Try primary feature first (silently — don't warn if unconfigured when fallback exists)
+  let featureConfig = getFeatureConfig(feature, fallbackFeature ? { silent: true } : undefined);
 
   if (!featureConfig && fallbackFeature) {
     const fallbackConfig = getFeatureConfig(fallbackFeature);
     if (fallbackConfig) {
       resolvedFeature = fallbackFeature;
       featureConfig = fallbackConfig;
-      console.warn(`[ImageGenerator] Feature "${feature}" not configured, fallback to "${fallbackFeature}"`);
+      // Silent fallback — this is expected behavior (e.g. scene_generation → character_generation)
     }
   }
 
@@ -367,7 +368,7 @@ async function submitViaChatCompletions(
     const errorText = await response.text();
     console.error('[ImageGenerator] Chat completions error:', response.status, errorText);
     let msg = `图片生成 API 错误: ${response.status}`;
-    try { const j = JSON.parse(errorText); msg = j.error?.message || msg; } catch {}
+    try { const j = JSON.parse(errorText); msg = j.error?.message || msg; } catch { }
     throw new Error(msg);
   }
 
@@ -634,8 +635,8 @@ async function pollTaskStatus(
 
       await new Promise(resolve => setTimeout(resolve, pollInterval));
     } catch (error) {
-      if (error instanceof Error && 
-          (error.message.includes('Task failed') || error.message.includes('no URL') || error.message.includes('Task not found'))) {
+      if (error instanceof Error &&
+        (error.message.includes('Task failed') || error.message.includes('no URL') || error.message.includes('Task not found'))) {
         throw error;
       }
       console.error(`[ImageGenerator] Poll attempt ${attempt} failed:`, error);
@@ -840,7 +841,7 @@ export async function imageUrlToBase64(url: string): Promise<string> {
   if (url.startsWith('data:image/') || url.startsWith('local-image://')) {
     return url;
   }
-  
+
   // Try to use Electron local storage first
   if (typeof window !== 'undefined' && window.imageStorage) {
     try {
@@ -854,7 +855,7 @@ export async function imageUrlToBase64(url: string): Promise<string> {
       console.warn('[ImageGenerator] Local save failed, falling back to base64:', error);
     }
   }
-  
+
   // Fallback to base64 for non-Electron environments
   const convertBlobToBase64 = (blob: Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -864,7 +865,7 @@ export async function imageUrlToBase64(url: string): Promise<string> {
       reader.readAsDataURL(blob);
     });
   };
-  
+
   // Try direct fetch first
   try {
     const response = await fetch(url, { mode: 'cors' });
@@ -875,7 +876,7 @@ export async function imageUrlToBase64(url: string): Promise<string> {
   } catch (error) {
     console.warn('[ImageGenerator] Direct fetch failed, trying proxy:', error);
   }
-  
+
   // Fallback: use our API proxy to fetch the image
   try {
     const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;

@@ -11,6 +11,7 @@
 import React, { useState, useMemo } from "react";
 import { Check, User, Users } from "lucide-react";
 import { useCharacterLibraryStore } from "@/stores/character-library-store";
+import { LocalImage } from "@/components/ui/local-image";
 import { useAppSettingsStore } from "@/stores/app-settings-store";
 import { useProjectStore } from "@/stores/project-store";
 import {
@@ -95,7 +96,7 @@ export function CharacterSelector({
                   className="w-full flex items-center gap-2 p-1.5 rounded hover:bg-muted text-left"
                 >
                   {thumbnail ? (
-                    <img src={thumbnail} alt={char.name} className="w-6 h-6 rounded object-cover" />
+                    <LocalImage src={thumbnail} alt={char.name} className="w-6 h-6 rounded object-cover" />
                   ) : (
                     <div className="w-6 h-6 rounded bg-muted flex items-center justify-center">
                       <User className="h-3 w-3" />

@@ -62,7 +62,7 @@ export function isContentModerationError(error: string | Error | unknown): boole
     ? error.message.toLowerCase()
     : String(error).toLowerCase();
 
-  return CONTENT_MODERATION_KEYWORDS.some(keyword => 
+  return CONTENT_MODERATION_KEYWORDS.some(keyword =>
     errorStr.includes(keyword.toLowerCase())
   );
 }
@@ -73,7 +73,7 @@ export function getVideoApiConfig() {
   if (!featureConfig) {
     return null;
   }
-  
+
   const keyManager = featureConfig.keyManager;
   const apiKey = keyManager.getCurrentKey() || '';
   const platform = featureConfig.platform;
@@ -85,7 +85,7 @@ export function getVideoApiConfig() {
   if (!videoBaseUrl) {
     return null;
   }
-  
+
   return {
     apiKey,
     keyManager,
@@ -113,7 +113,7 @@ export async function convertToHttpUrl(rawUrl: unknown): Promise<string> {
   }
 
   let base64 = url;
-  if (url.startsWith('local-image://')) {
+  if (url.startsWith('local-image://') || url.startsWith('idb-image://')) {
     base64 = await normalizeUrl(url);
   }
 
@@ -170,8 +170,11 @@ function inferVideoApiFormatFromEndpointType(endpointTypeRaw: string): VideoApiF
   if (direct) return direct;
 
   if (endpointType.includes('sora') || endpointType.includes('/v1/videos')) return 'openai_official';
-  if (endpointType.includes('openai') && endpointType.includes('video')) return 'openai_official';
+  if (endpointType.includes('openai') && (endpointType.includes('video') || endpointType.includes('视频'))) return 'openai_official';
   if (endpointType.includes('kling') || endpointType.includes('omni-video')) return 'kling';
+
+  // Recognize Chinese endpoint type labels (e.g. from 361API)
+  if (endpointType.includes('视频统一') || endpointType.includes('video/create')) return 'unified';
 
   if (
     endpointType.includes('seedance') ||
@@ -205,6 +208,18 @@ function inferVideoApiFormatFromEndpointType(endpointTypeRaw: string): VideoApiF
 }
 
 function detectVideoApiFormat(model: string): VideoApiFormat {
+  const m = model.toLowerCase();
+
+  // Veo models: always use unified format (POST /v1/video/create with JSON body)
+  // This takes priority over metadata-driven routing because:
+  // 1. 361API's unified format supports images, enhance_prompt, enable_upsample, aspect_ratio
+  // 2. The openai_official format uses multipart which doesn't support these veo-specific fields
+  // 3. Endpoint type labels like 'openAI视频格式' don't necessarily mean the model works with that format
+  if (isVeoModel(model)) {
+    console.log(`[VideoGen] Veo model detected: ${model} -> unified format (POST /v1/video/create)`);
+    return 'unified';
+  }
+
   const endpointTypes = useAPIConfigStore.getState().modelEndpointTypes[model];
   if (endpointTypes && endpointTypes.length > 0) {
     const formats = endpointTypes
@@ -222,7 +237,6 @@ function detectVideoApiFormat(model: string): VideoApiFormat {
     console.warn(`[VideoGen] Unknown endpoint types for ${model}:`, endpointTypes, 'fallback to name-based');
   }
 
-  const m = model.toLowerCase();
   if (m.includes('sora-2') || m.includes('openai')) return 'openai_official';
   if (m.includes('kling')) return 'kling';
   if (m.includes('seedance') || m.includes('doubao')) return 'volc';
@@ -246,10 +260,16 @@ function handleVideoSubmitError(
     errorMessage = errorJson.error?.message || errorJson.message || errorMessage;
   } catch {
     // ignore JSON parse errors for plain text responses
+    if (errorText) errorMessage = errorText.substring(0, 300);
   }
 
-  if (status === 401 || status === 403) throw new Error('API key is invalid or unauthorized.');
-  if (status === 429) throw new Error('Rate limit reached. Please retry later.');
+  // Recognize RESOURCE_EXHAUSTED / quota errors
+  if (errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('check quota')) {
+    throw new Error('API 配额已耗尽，请检查账户余额或等待配额重置');
+  }
+
+  if (status === 401 || status === 403) throw new Error('API Key 无效或未授权，请检查设置');
+  if (status === 429) throw new Error('API 请求频率超限，请稍后再试');
   throw new Error(errorMessage);
 }
 
@@ -293,11 +313,11 @@ function extractVideoUrl(data: any): string | null {
 function getVideoTaskStatus(data: any): string {
   return String(
     data?.status ??
-      data?.detail?.status ??
-      data?.state ??
-      data?.detail?.state ??
-      data?.data?.status ??
-      '',
+    data?.detail?.status ??
+    data?.state ??
+    data?.detail?.state ??
+    data?.data?.status ??
+    '',
   ).toLowerCase();
 }
 
@@ -445,13 +465,16 @@ async function callUnifiedVideoApi(
     if (Object.keys(metadata).length > 0) body.metadata = metadata;
   }
 
+  // Prefer /v1/video/create (used by 361API and most providers)
+  // then fallback to /v1/video/generations (used by some providers)
   const submitUrls = [
-    buildEndpoint(baseUrl, 'video/generations'),
     buildEndpoint(baseUrl, 'video/create'),
+    buildEndpoint(baseUrl, 'video/generations'),
   ];
 
   let submitData: any = null;
   let submitError: Error | null = null;
+  let successfulSubmitUrl = '';
 
   for (const submitUrl of submitUrls) {
     const resp = await fetch(submitUrl, {
@@ -467,12 +490,50 @@ async function callUnifiedVideoApi(
     if (resp.ok) {
       submitData = await resp.json();
       submitError = null;
+      successfulSubmitUrl = submitUrl;
+      console.log(`[VideoGen] Submit succeeded via: ${submitUrl}`);
       break;
     }
 
     const errorText = await resp.text();
+
+    // 401/403/429 = auth/quota errors, do NOT try next endpoint (would waste quota)
+    // These are definitive errors that apply to all endpoints
+    if (resp.status === 401 || resp.status === 403 || resp.status === 429) {
+      handleVideoSubmitError(resp.status, errorText, keyManager);
+    }
+
+    // Check for RESOURCE_EXHAUSTED in response body (may come as various status codes)
+    if (errorText.includes('RESOURCE_EXHAUSTED') || errorText.includes('check quota')) {
+      throw new Error('API 配额已耗尽，请检查账户余额或等待配额重置');
+    }
+
+    // 404/405 = endpoint doesn't exist, try next
     if (resp.status === 404 || resp.status === 405) {
-      submitError = new Error(`Video API endpoint not available (${resp.status}).`);
+      console.warn(`[VideoGen] Endpoint ${submitUrl} returned ${resp.status}, trying next...`);
+      submitError = new Error(`Video API endpoint returned ${resp.status}`);
+      continue;
+    }
+
+    // 500/502/503 = could be "endpoint doesn't exist" OR a real upstream error
+    // If the response has a structured JSON error message, it's a real error — throw immediately
+    // If it's a generic/empty response, it might be an infrastructure error — try next endpoint
+    if (resp.status === 500 || resp.status === 502 || resp.status === 503) {
+      let parsedMessage = '';
+      try {
+        const errorJson = JSON.parse(errorText);
+        parsedMessage = errorJson.message || errorJson.error?.message || '';
+      } catch { /* not JSON */ }
+
+      if (parsedMessage) {
+        // Structured error with a clear message — this is a real API error, don't waste another request
+        console.error(`[VideoGen] API error: ${parsedMessage}`);
+        throw new Error(parsedMessage);
+      }
+
+      // Generic/unstructured 500 — might be endpoint not found, try next
+      console.warn(`[VideoGen] Endpoint ${submitUrl} returned ${resp.status}, trying next...`);
+      submitError = new Error(`Video API endpoint returned ${resp.status}: ${errorText.substring(0, 200)}`);
       continue;
     }
 
@@ -487,51 +548,60 @@ async function callUnifiedVideoApi(
   const taskId = (submitData.task_id || submitData.id || submitData.request_id)?.toString();
   if (!taskId) throw new Error('Video task id is missing from submit response.');
 
-  const pollUrls = [
-    buildEndpoint(baseUrl, `video/generations/${taskId}`),
-    buildEndpoint(baseUrl, `video/query?id=${encodeURIComponent(taskId)}`),
-  ];
+  // Derive poll URL from the successful submit endpoint
+  // /v1/video/create → poll via /v1/video/query?id=xxx
+  // /v1/video/generations → poll via /v1/video/generations/{id}
+  const usedCreateEndpoint = successfulSubmitUrl.includes('video/create');
+  const pollUrl = usedCreateEndpoint
+    ? buildEndpoint(baseUrl, `video/query?id=${encodeURIComponent(taskId)}`)
+    : buildEndpoint(baseUrl, `video/generations/${taskId}`);
+  console.log(`[VideoGen] Poll URL: ${pollUrl} (submit was ${usedCreateEndpoint ? 'video/create' : 'video/generations'})`);
 
   for (let attempt = 0; attempt < VIDEO_POLL_MAX_ATTEMPTS; attempt++) {
     onProgress?.(Math.min(20 + Math.floor((attempt / VIDEO_POLL_MAX_ATTEMPTS) * 80), 99));
     await sleep(VIDEO_POLL_INTERVAL_MS);
 
-    for (const pollUrl of pollUrls) {
-      const statusResponse = await fetch(pollUrl, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-      });
+    const statusResponse = await fetch(pollUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+    });
 
-      if (!statusResponse.ok) continue;
+    if (!statusResponse.ok) {
+      if (attempt === 0) {
+        console.warn(`[VideoGen] Poll endpoint ${pollUrl} returned ${statusResponse.status}`);
+      }
+      continue;
+    }
 
-      const statusData = await statusResponse.json();
-      const status = getVideoTaskStatus(statusData);
+    const statusData = await statusResponse.json();
+    const status = getVideoTaskStatus(statusData);
 
-      if (status === 'completed' || status === 'succeeded' || status === 'success') {
-        let videoUrl = extractVideoUrl(statusData);
-        if (!videoUrl) {
-          videoUrl = await refetchVideoUrlAfterCompletion(async () => {
-            const followResp = await fetch(pollUrl, {
-              method: 'GET',
-              headers: {
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-              },
-            });
-            if (!followResp.ok) return null;
-            return followResp.json();
+    if (status === 'completed' || status === 'succeeded' || status === 'success') {
+      let videoUrl = extractVideoUrl(statusData);
+      if (!videoUrl) {
+        videoUrl = await refetchVideoUrlAfterCompletion(async () => {
+          const followResp = await fetch(pollUrl, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${apiKey}`,
+            },
           });
-        }
-        if (videoUrl) return videoUrl;
-        continue;
+          if (!followResp.ok) return null;
+          return followResp.json();
+        });
       }
+      if (videoUrl) return videoUrl;
+      continue;
+    }
 
-      if (status === 'failed' || status === 'error' || status === 'cancelled') {
-        throw new Error(getVideoTaskErrorMessage(statusData));
-      }
+    if (status === 'failed' || status === 'error' || status === 'cancelled') {
+      throw new Error(getVideoTaskErrorMessage(statusData));
     }
   }
 
@@ -1200,7 +1270,7 @@ export async function extractLastFrameFromVideo(
   // 婵犵數濮烽弫鎼佸磻閻愬搫鍨傞柛顐ｆ礀缁犱即鏌涘┑鍕姢闁活厽鎹囬弻锝夋偄鐠囪尙鍔烽梺閫炲苯澧悽顖椻偓宕囨殾婵犲﹤瀚刊鎾煟閻斿搫顣兼慨锝呮搐閳规垿鎮欓懜闈涙锭缂傚倸绉崑鎾寸節濞堝灝鏋旈柛濠冾殘閸掓帗绻濋崶鑸垫櫔闂侀€炲苯澧寸€殿喖顭烽幃銏ゆ倻濡櫣褰撮梻浣规灱閺呮盯宕幍顔剧幓闁哄啫鐗婇悡?file://
   const resolvedUrl = videoUrl;
   console.log('[VideoGen] Loading video for frame extraction:', resolvedUrl);
-  
+
   return new Promise((resolve) => {
     const video = document.createElement('video');
     // local-image:// 闂傚倸鍊搁崐椋庣矆娓氣偓楠炴牠顢曢妶鍌氫壕婵ê宕崢瀵糕偓瑙勬礀缂嶅﹪鐛箛鏇氭勃閻犱浇娅曢惈蹇涙⒒娴ｇ顥忛柛瀣瀹曚即骞樼拠鑼幋閻庡箍鍎遍ˇ浼存偂閸愵喗鐓忓璺虹墕閸旀氨绱掗悪娆忔噳閸嬫挾鎲撮崟顒傤槰闂佺粯鎼换婵嗩嚕婵犳碍鏅插璺好￠埡鍛厪濠㈣泛鐗嗛崝鏉懨归悩灞傚仮闁诡喗顨堥幉鎾礋椤掑偆妲版俊鐐€戦崝宀勬偋閹捐崵宓侀煫鍥ㄦ磵閸嬫捇鏁愭惔鈩冪彯闂佽桨绀侀澶愬蓟濞戙垹鐒洪柛鎰典簼閸ｎ喖顪冮妶蹇撶槣闁哥姵顨堥幑銏犫槈閵忕姷顓洪梺缁樺姈濞兼瑧鍠婂鍥╃＝濞达絽澹婂Σ娲煙閾忣偅宕屽┑鈩冩尦楠炴帒螖閳ь剛绮堥崼婢濆綊鏁愰崶銊ユ畬闂?crossOrigin
@@ -1210,11 +1280,11 @@ export async function extractLastFrameFromVideo(
     video.preload = 'auto';
     video.muted = true;
     video.playsInline = true;
-    
+
     let hasResolved = false;
     let targetTime = -1; // -1 闂傚倸鍊峰ù鍥х暦閻㈢纾婚柣鎰暩閻瑩鐓崶銊р槈缂佲偓婢舵劕绠规繛锝庡墮婵＄厧顩奸崨顓涙斀妞ゆ梹鏋绘笟娑㈡煕濡灝袚缂佸倸绉规俊鍫曞幢閺囩姷鐣炬俊鐐€栭悧妤冨垝鎼达絾鏆滄繛鎴炲焹閸嬫挸鈻撻崹顔界亶闂佸湱鎳撳ú顓㈢嵁閸愵亝鍠嗛柛鏇ㄥ墮椤庢挾绱撴担鍓插剰缂併劑浜堕獮鎰板礃椤旇В鎷?
     let isSeekStarted = false;
-    
+
     const cleanup = () => {
       video.onloadedmetadata = null;
       video.onloadeddata = null;
@@ -1226,7 +1296,7 @@ export async function extractLastFrameFromVideo(
       video.src = '';
       video.load();
     };
-    
+
     const timeoutId = setTimeout(() => {
       if (!hasResolved) {
         hasResolved = true;
@@ -1235,25 +1305,25 @@ export async function extractLastFrameFromVideo(
         resolve(null);
       }
     }, 30000); // 30s timeout
-    
+
     const captureFrame = () => {
       if (hasResolved) return;
-      
+
       // 缂傚倸鍊搁崐鐑芥嚄閸洘鎯為幖娣妼閻骞栧ǎ顒€濡肩紒鎰殜閺岋繝宕堕埡浣囷絿鈧娲栧鍫曞箞閵娿儙鐔煎锤濡も偓閹界敻姊洪崫銉バ㈡俊顐ｇ箞瀵鈽夐姀鐘靛姶闂佸憡鍓崨顖滅暢闂傚倷绀侀幖顐⑽涙惔銊ョ？闁汇垻顭堢粻鏍ㄤ繆椤栨繃纭堕柣銈傚亾闂備浇顫夐崕鎶芥偤閵娾晛纾块柟鐐墯濞撳鏌曢崼婵囶棡濠㈣泛瀚伴弻娑樷枎韫囨挻娈銈嗘穿缂嶄礁鐣疯ぐ鎺濇晝闁靛繈鍨婚悰顕€姊虹拠鎻掑毐缂傚秴妫濆畷鎴﹀川鐎涙ê浠?
       if (video.videoWidth === 0 || video.videoHeight === 0) {
         console.warn('[VideoGen] Video dimensions not ready, waiting...');
         setTimeout(captureFrame, 100);
         return;
       }
-      
+
       try {
         video.pause();
-        
+
         const canvas = document.createElement('canvas');
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         const ctx = canvas.getContext('2d');
-        
+
         if (!ctx) {
           console.warn('[VideoGen] Cannot get canvas context');
           hasResolved = true;
@@ -1262,10 +1332,10 @@ export async function extractLastFrameFromVideo(
           resolve(null);
           return;
         }
-        
+
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-        
+
         console.log('[VideoGen] Extracted last frame:', {
           width: canvas.width,
           height: canvas.height,
@@ -1273,7 +1343,7 @@ export async function extractLastFrameFromVideo(
           currentTime: video.currentTime,
           targetWas: targetTime,
         });
-        
+
         hasResolved = true;
         clearTimeout(timeoutId);
         cleanup();
@@ -1286,40 +1356,40 @@ export async function extractLastFrameFromVideo(
         resolve(null);
       }
     };
-    
+
     // 闂傚倷娴囬褏鈧稈鏅犻、娆撳冀椤撶偟鐛ラ梺鍦劋椤ㄥ懐澹曟繝姘厵闁绘劦鍓氶悘閬嶆煛閳?seek 闂傚倸鍊搁崐鐑芥倿閿曞倹鍎戠憸鐗堝笒缁€澶屸偓鍏夊亾闁逞屽墴閸┾偓妞ゆ帊绀侀崵顒勬煕閹捐泛鏋庨柣锝囧厴閹粙宕ㄦ繝鍕Ц闁诲骸绠嶉崕閬嶅箠韫囨稒鍊?
     const startSeek = () => {
       if (hasResolved || isSeekStarted) return;
-      
+
       const duration = video.duration;
       if (!duration || duration <= 0 || !isFinite(duration)) {
         console.warn('[VideoGen] Invalid video duration:', duration);
         return;
       }
-      
+
       isSeekStarted = true;
       targetTime = Math.max(0.1, duration - seekOffset);
       console.log('[VideoGen] Starting seek, duration:', duration, 'target:', targetTime);
-      
+
       video.currentTime = targetTime;
     };
-    
+
     // 闂傚倸鍊搁崐椋庣矆娓氣偓楠炴牠顢曢敃鈧壕鐟懊归悩宸劀缂傚秵鐗曢…璺ㄦ崉閻戞ɑ鎷遍梺绋跨箲缁捇寮诲☉銏╂晝闁挎繂妫涢ˇ銊╂⒑閸濆嫭濯奸柛鎾村哺楠炲牓濡搁妷顔藉缓闂佺硶鍓濋妵鐐佃姳婵犳碍鈷戦悗鍦閸ゆ瑧绱掔紒姗堣€跨€?timeupdate 闂傚倸鍊搁崐鐑芥嚄閸洖纾块柣銏㈩焾閻ょ偓绻濇繝鍌滃闁搞劌鍊块弻锝夊閵忊晝鍔哥紓浣哄У閼归箖鈥﹂崸妤佸殝闂傚牊绋戦～宀€绱撴担鍝勑ョ紒顕呭灦婵＄敻宕熼姘鳖啋闁荤姾娅ｉ崕銈夋倵妤ｅ啯鈷戦柛婵嗗濡插摜绱撳鍜冨伐妞ゆ洩缍佸畷濂稿即閻愰潧骞愰梻浣侯焾閺堫剚绔熼弴鐐嶏綁宕奸妷锔惧幗闁瑰吋鐣崐銈咁焽閹邦兘鏀介柣鎰嚋闊剛鈧鍣崑鍕敇婵傜鐐婇柨鏃囨婵即姊绘担椋庝覆缂佽弓绮欓幆澶愬礂閼测晜鎯為梻鍌氬€搁崐宄懊归崶顒婄稏濠㈣泛顑囬々鎻捗归悩宸剰缁炬儳娼￠幃妤呮濞戞瑥鏆堥悗瑙勬礃閻擄繝鐛弽顬ュ酣顢楅埀顒佷繆娴犲鐓曢幖绮光偓鎰佸妷闂侀潧娲ょ€氭澘顕ｉ鈧畷鎺戔槈濞嗘垵娑ч梻鍌欑劍閹爼宕濆畝鍕ч柟闂寸閽冪喖鏌ㄩ悢鍝勑㈢紒鈧崘顔界厪濠电倯鍐ㄦ殶闁告濮ょ换婵堝枈濡椿娼戦梺绋款儏鐎氼剟鈥﹂崶顒€鐏抽柟棰佺濞堛劌顪冮妶鍡樼５闁稿鎹囬弻鐔兼惞椤愩倗鐓夊┑鈽嗗亜閸燁偊鍩ユ径濠庢僵闁稿繐銇欒濮?
     video.ontimeupdate = () => {
       if (hasResolved || targetTime < 0) return; // 闂傚倸鍊搁崐椋庣矆娓氣偓楠炴牠顢曢敂钘変罕濠电姴锕ょ€氼噣銆呴崣澶岀瘈濠电姴鍊归崳鐑樸亜椤愶絾绀嬮柡宀€鍠撻埀顒傛暩椤牊绂掗敃鍌涚厱?seek 闂傚倸鍊搁崐椋庣矆娓氣偓楠炴牠顢曢敃鈧悿顕€鏌涢幇顓犮偞闁哄鐗楃换娑㈠箣濞嗗繒浠肩紓浣哄閸ㄥ爼寮婚敐澶婄闁挎繂鎲涢幘缁樼厱?
-      
+
       // 闂傚倷娴囧畷鐢稿窗閹邦喖鍨濋幖娣灪濞呯姵淇婇妶鍛櫣缂佺姵婢橀埞鎴︽偐鐎圭姴顥濈紓浣哄С閸楀啿顫忓ú顏嶆晢闁逞屽墰缁梻鈧潧鎽滅壕濂告煃閸濆嫭鍣洪柣鎾寸懄閵囧嫰寮借椤ユ粓鏌涢悢璺哄祮鐎规洏鍨介獮鎺懳旀担鍙夊闂備胶绮崹鐔煎疾濠婂啠鏋嶉柟鍓х帛閻撴洟鏌ｅΟ璇插婵炲牊绮撻弻鐔碱敊閸濆嫬濮﹂梺杞扮劍閸旀牕顕ラ崟顒傜瘈闁告洦鍘界紞渚€姊婚崒娆戭槮濠㈢懓锕畷鎴﹀川椤掔厧鎼～婊堝焵椤掑嫬鏋佺€广儱顦伴崑鍕煕韫囨挾姣為柟宄邦煼濮婃椽宕ㄦ繝鍐槱闂佺顑呯€氫即銆侀弮鍫晢闁稿本绮庨敍婊堟煟閻樺弶澶勯柣鎿勭節瀹曪綁宕熼娑樹壕婵炲牆鐏濆▍姗€鏌涢敐蹇曠М妤犵偛锕ら…銊╁醇閻曚焦顥堟繝鐢靛仦閸ㄥ爼宕欓悷鎷旓綀銇愰幒鎾嫽婵炶揪绲块…鍫ュ箖閹达附鐓曢幖娣灩閳绘洜鈧娲橀悡鈥愁嚕婵犳艾唯闁靛／灞芥暥?
       if (video.currentTime >= targetTime - 0.05) {
         console.log('[VideoGen] timeupdate reached target, currentTime:', video.currentTime, 'target:', targetTime);
         captureFrame();
       }
     };
-    
+
     // 闂?seek 闂傚倸鍊峰ù鍥敋瑜嶉湁闁绘垼妫勭粻鐘绘煙閹规劦鍤欓悗姘槹閵囧嫰骞掗幋婵愪患闂佹悶鍔岄崐褰掑箞閵娿儙鐔煎箰鎼达絻鈧劗绱撴笟鍥т簻缂佸缍婂濠氬Χ婢跺﹦顔愭繛杈剧秬椤鏌ㄩ鐘电＝濞达絾褰冩禍楣冩煟鎼搭垳绉甸柛鐘愁殜閹?
     video.onseeked = () => {
       if (hasResolved || targetTime < 0) return;
       console.log('[VideoGen] onseeked fired, currentTime:', video.currentTime, 'target:', targetTime);
-      
+
       // 濠电姷鏁告慨鐑姐€傞挊澹╋綁宕ㄩ弶鎴狅紱闂侀€炲苯澧撮柡灞剧〒閳ь剨缍嗛崑鍛暦瀹€鍕厸鐎光偓鐎ｎ剛锛熸繛瀵稿婵″洭骞忛悩璇茬闁圭儤鍩堝銉モ攽閻樻鏆柍褜鍓欓崯璺ㄧ棯瑜旈弻鐔碱敊閻撳簶鍋撻幖浣瑰仼闁绘垼妫勫敮闂佸啿鎼崐鐟扳枍閸℃稒鈷戠紓浣姑慨锕傛煕閹惧鎳囬柟顔惧仱楠炴牗鎷呴崗澶嬪?seek 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁嶉崟顒佹闂佽法鍠撴慨浼村焵椤掆偓閸婂潡寮崒鐐茬闁归偊鍎烽敓鐘斥拺閻犳亽鍔岄弸鏂库攽椤旂偓鏆€规洘娲橀幆鏃堬綖椤戣法鐩庨梻浣告惈閸燁偊宕愰悷鎵虫瀺闁哄洢鍨洪悡鏇㈡煏婵炑冨暙娴犳﹢姊婚崶褜妯€闁哄被鍔岄埞鎴﹀幢濡儤顏ら梺鐓庡级閻楃姴顫?
       if (Math.abs(video.currentTime - targetTime) < 0.5) {
         // seek 闂傚倸鍊搁崐鐑芥嚄閸洖绠犻柟鍓х帛閸嬨倝鏌曟繛鐐珔缂佲偓婢舵劖鐓涢柛銉㈡櫅閺嬫垿鏌涘▎蹇曠缂佺粯鐩獮瀣枎韫囨洑鐥梻浣告惈閹峰宕滃☉銏犵劦妞ゆ巻鍋撻柛妯荤矒瀹曟垿骞樼紒妯煎帗閻熸粍绮撳畷婊堟偄閻撳海鐣哄┑鐐叉▕娴滄粎绮婚敐鍡欑瘈闁割煈鍋勬慨鍥ㄧ箾閸偄浜版慨濠冩そ瀹曘劍绻濇担铏圭畳闂備礁鎲￠幐濠氭儎椤栫偑鈧線寮崼婵堫攨闂佺粯鍔忛弲婊堬綖瀹ュ鈷戦柛锔诲幖娴滈箖鏌涢幘鏉戝摵鐎规洘娲濈粻娑樷槈濞嗘垵骞堥梻浣虹帛濮婄銇愰崘鈺冾洸濡わ絽鍟埛鎺懨归敐鍕劅闁衡偓閻楀牄浜滄い鎰╁焺濡叉悂鎮￠妶鍡欑瘈闂傚牊渚楅崕鎴犫偓?
@@ -1335,21 +1405,21 @@ export async function extractLastFrameFromVideo(
         });
       }
     };
-    
+
     // 闂傚倷娴囧畷鐢稿窗閹邦喖鍨濋幖娣灪濞呯姵淇婇妶鍛櫣缂佺姵褰冮妴鎺戭潩閿濆懍澹曢梻浣瑰缁诲嫰宕戦悢鐓庣劦妞ゆ帒锕︾粔鐢告煕鐎ｎ偅灏垫俊鍙夊姍閺佹劖寰勭€ｎ剙骞嶉梺璇叉捣閺佹悂鈥﹂崼鐔侯浄闁挎梻鏅粻楣冩煕椤愶絿绠橀柛鈺嬬秮閺屸€崇暆閳ь剟宕伴幘璇茬闁绘顕ч悘鎶芥煣韫囷絽浜炲ù婊庝簻閳规垿鎮╅幇浣告櫛闂佸摜濮靛畝绋跨暦閹达附鍊风€瑰壊鍠氶崝宄邦渻閵堝懐绠伴柣妤€锕﹂埀顒傛暩婵挳鈥︾捄銊﹀磯闁绘垶蓱閹峰崬鈹戦悙鑼⒈闁革綇绲介～蹇撁洪鍛画闂佽顔栭崰妤呭箟婵傚憡鈷戦柛娑橈攻閳锋劙鏌ｅΔ浣圭闁炽儲妫冨畷姗€顢欓懖鈺嬬床婵犵數濮磋墝闁稿鎹囬弻锝夊箳閹搭垱鏁剧紓浣虹帛缁诲牆螞閸愩劉妲堥柛鎰絻椤姵绻?seek
     video.onloadeddata = () => {
       if (hasResolved) return;
       console.log('[VideoGen] onloadeddata, readyState:', video.readyState, 'duration:', video.duration);
       startSeek();
     };
-    
+
     // 闂傚倷娴囧畷鐢稿窗閹邦喖鍨濋幖娣灪濞呯姵淇婇妶鍛櫣缂佺姷澧楅幈銊モ攽閸℃凹娼舵繛瀛樼矊缂嶅﹪寮诲☉妯锋瀻闊浄绲炬婵＄偑鍊愰弲婵嬪礂濮椻偓瀵寮撮悢椋庣獮濠电偞鍨崹娲敁瀹ュ鐓熼煫鍥ㄦ崌閻涙粎绱掔紒妯肩疄鐎殿喖顭烽弫鎾绘偐閼碱剙濮︽俊鐐€栫敮鎺斺偓姘煎弮瀹曟劙鏌ㄧ€ｃ劋绨婚梺鐟版惈缁夊墎鎷归悧鍫滅箚鐎瑰壊鍠栭悘锛勭磼缂佹娲存鐐差儔閹瑧鍒掔憴鍕伜闂傚倷绀侀幗婊勬叏閹绢喗鐓€闁挎繂顦粻姘舵煕閹伴潧鏋涚紒鈧崼銏″枑閹艰揪绲洪崑?seek闂傚倸鍊搁崐鐑芥倿閿旈敮鍋撶粭娑樻噽閻瑩鏌熸潏楣冩闁稿顑夐弻娑㈠焺閸愵厽宸㈤梺鎼炲労閸擄箓寮崱娑欑厱闁哄洢鍔屾晶浼存煕閺傝法浠涚紒缁樼箞婵偓闁挎繂鎳愰崢顐ょ磽娴ｅ壊鍎愰柟绋垮⒔閸?
     video.oncanplaythrough = () => {
       if (hasResolved) return;
       console.log('[VideoGen] oncanplaythrough, readyState:', video.readyState, 'duration:', video.duration);
       startSeek();
     };
-    
+
     video.onerror = (e) => {
       if (!hasResolved) {
         hasResolved = true;
@@ -1359,7 +1429,7 @@ export async function extractLastFrameFromVideo(
         resolve(null);
       }
     };
-    
+
     video.src = resolvedUrl;
     video.load();
   });

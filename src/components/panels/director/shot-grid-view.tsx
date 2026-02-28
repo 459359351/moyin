@@ -9,7 +9,7 @@
  * Features: shot thumbnails grid, right detail panel, variation selector, keyframe generation
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useScriptStore, useActiveScriptProject } from "@/stores/script-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useCharacterLibraryStore, type Character } from "@/stores/character-library-store";
@@ -50,6 +50,16 @@ import { generateAngleSwitch } from "@/lib/ai/runninghub-client";
 import { getAngleLabel, type HorizontalDirection, type ElevationAngle, type ShotSize } from "@/lib/ai/runninghub-angles";
 import { useAPIConfigStore } from "@/stores/api-config-store";
 import { parseApiKeys } from "@/lib/api-key-manager";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface ShotGridViewProps {
   onGenerateImage?: (shot: Shot, type: "start" | "end") => Promise<string>;
@@ -78,6 +88,7 @@ export function ShotGridView({ onGenerateImage, onGenerateVideo }: ShotGridViewP
   const [angleSwitchTarget, setAngleSwitchTarget] = useState<"start" | "end">("start");
   const [angleSwitchResult, setAngleSwitchResult] = useState<AngleSwitchResult | null>(null);
   const [isAngleSwitching, setIsAngleSwitching] = useState(false);
+  const [showBatchConfirm, setShowBatchConfirm] = useState(false);
 
   const projectId = activeProjectId || "";
   const shots = scriptProject?.shots || [];
@@ -93,7 +104,7 @@ export function ShotGridView({ onGenerateImage, onGenerateVideo }: ShotGridViewP
 
   // Check if all start frames are generated
   const allStartFramesGenerated = useMemo(() => {
-    return shots.length > 0 && shots.every((s) => 
+    return shots.length > 0 && shots.every((s) =>
       s.keyframes?.find((k) => k.type === "start")?.imageUrl || s.imageUrl
     );
   }, [shots]);
@@ -129,13 +140,13 @@ export function ShotGridView({ onGenerateImage, onGenerateVideo }: ShotGridViewP
   const handleVariationChange = (shotId: string, charId: string, varId: string) => {
     const shot = shots.find((s) => s.id === shotId);
     const existing = { ...(shot?.characterVariations || {}) };
-    
+
     if (varId === "default") {
       delete existing[charId];
     } else {
       existing[charId] = varId;
     }
-    
+
     updateShot(projectId, shotId, {
       characterVariations: existing,
     });
@@ -341,28 +352,20 @@ export function ShotGridView({ onGenerateImage, onGenerateVideo }: ShotGridViewP
     toast.success("视角已应用");
   };
 
-  // Batch generate start frames
-  const handleBatchGenerateImages = async () => {
-    if (!onGenerateImage) {
-      toast.error("图片生成服务未配置");
-      return;
-    }
-
-    const shotsToProcess = allStartFramesGenerated
+  // The actual batch generation logic (called after confirmation or directly)
+  const runBatchGenerate = useCallback(async (forceAll: boolean) => {
+    if (!onGenerateImage) return;
+    const shotsToProcess = forceAll
       ? shots
       : shots.filter((s) => !s.keyframes?.find((k) => k.type === "start")?.imageUrl && !s.imageUrl);
 
     if (shotsToProcess.length === 0) return;
 
-    if (allStartFramesGenerated) {
-      if (!confirm("确定要重新生成所有镜头的首帧吗？")) return;
-    }
-
     setBatchProgress({
       isVisible: true,
       current: 0,
       total: shotsToProcess.length,
-      message: allStartFramesGenerated ? "正在重新生成所有首帧..." : "正在批量生成首帧...",
+      message: forceAll ? "正在重新生成所有首帧..." : "正在批量生成首帧...",
     });
 
     for (let i = 0; i < shotsToProcess.length; i++) {
@@ -406,6 +409,21 @@ export function ShotGridView({ onGenerateImage, onGenerateVideo }: ShotGridViewP
 
     setBatchProgress({ isVisible: false, current: 0, total: 0 });
     toast.success("批量生成完成");
+  }, [onGenerateImage, shots, projectId, updateShot]);
+
+  // Batch generate start frames
+  const handleBatchGenerateImages = async () => {
+    if (!onGenerateImage) {
+      toast.error("图片生成服务未配置");
+      return;
+    }
+
+    if (allStartFramesGenerated) {
+      setShowBatchConfirm(true);
+      return;
+    }
+
+    runBatchGenerate(false);
   };
 
   if (shots.length === 0) {
@@ -823,6 +841,29 @@ export function ShotGridView({ onGenerateImage, onGenerateVideo }: ShotGridViewP
           setAngleSwitchOpen(true);
         }}
       />
+
+      {/* Batch regenerate confirmation */}
+      <AlertDialog open={showBatchConfirm} onOpenChange={setShowBatchConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>重新生成所有首帧</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定要重新生成所有镜头的首帧吗？这将覆盖已有的首帧图片。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setShowBatchConfirm(false);
+                runBatchGenerate(true);
+              }}
+            >
+              确认重新生成
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

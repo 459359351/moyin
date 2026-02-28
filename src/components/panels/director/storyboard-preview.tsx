@@ -10,18 +10,19 @@
  */
 
 import { useState, useCallback } from "react";
+import { useResolvedImageUrl } from "@/hooks/use-resolved-image-url";
 import { Button } from "@/components/ui/button";
 import { useDirectorStore, useActiveDirectorProject } from "@/stores/director-store";
 import { splitStoryboardImage, type SplitResult } from "@/lib/storyboard/image-splitter";
 import { persistSceneImage } from '@/lib/utils/image-persist';
-import { 
-  RefreshCw, 
-  Scissors, 
-  ArrowLeft, 
-  Loader2, 
+import {
+  RefreshCw,
+  Scissors,
+  ArrowLeft,
+  Loader2,
   ImageIcon,
   AlertCircle,
-  CheckCircle2 
+  CheckCircle2
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -43,6 +44,7 @@ export function StoryboardPreview({ onBack, onSplitComplete }: StoryboardPreview
   // Get current project data
   const projectData = useActiveDirectorProject();
   const storyboardImage = projectData?.storyboardImage || null;
+  const resolvedStoryboardImage = useResolvedImageUrl(storyboardImage || '');
   const storyboardStatus = projectData?.storyboardStatus || 'idle';
   const storyboardError = projectData?.storyboardError || null;
   const storyboardConfig = projectData?.storyboardConfig || {
@@ -216,10 +218,10 @@ export function StoryboardPreview({ onBack, onSplitComplete }: StoryboardPreview
       setIsSplitting(false);
     }
   }, [
-    storyboardImage, 
-    storyboardConfig, 
-    setSplitScenes, 
-    setStoryboardStatus, 
+    storyboardImage,
+    storyboardConfig,
+    setSplitScenes,
+    setStoryboardStatus,
     setStoryboardError,
     onSplitComplete
   ]);
@@ -293,12 +295,12 @@ export function StoryboardPreview({ onBack, onSplitComplete }: StoryboardPreview
       {/* Storyboard image preview */}
       <div className="relative rounded-lg border overflow-hidden bg-muted/30">
         <img
-          src={storyboardImage}
+          src={resolvedStoryboardImage || storyboardImage || ''}
           alt="Storyboard contact sheet"
           className="w-full h-auto object-contain"
           style={{ maxHeight: '400px' }}
         />
-        
+
         {/* Splitting overlay */}
         {isSplitting && (
           <div className="absolute inset-0 bg-background/80 flex flex-col items-center justify-center">
@@ -370,7 +372,7 @@ export function StoryboardPreview({ onBack, onSplitComplete }: StoryboardPreview
 
       {/* Tips */}
       <div className="text-xs text-muted-foreground bg-muted/50 rounded-md p-2">
-        <p>💡 {storyboardConfig.sceneCount === 1 
+        <p>💡 {storyboardConfig.sceneCount === 1
           ? '点击"下一步"直接进入场景编辑，您可以编辑场景的提示词并生成视频。'
           : `点击"切割场景"将按 ${storyboardConfig.sceneCount} 格均匀网格切割，并自动去除边缘分隔线。切割后您可以编辑每个场景的提示词。`
         }</p>

@@ -68,25 +68,25 @@ function parseBindingValue(binding: string): { platform: string; model?: string 
 function getBoundPlatformAndModel(store: ReturnType<typeof useAPIConfigStore.getState>, feature: AIFeature): { platform: string; model?: string } | null {
   const bindings = store.getFeatureBindings(feature);
   if (!bindings || bindings.length === 0) return null;
-  
+
   // 取第一个绑定
   const binding = bindings[0];
   if (!binding) return null;
-  
+
   // 新格式: platform:model
   const parsed = parseBindingValue(binding);
   if (parsed) {
     return parsed;
   }
-  
+
   // 兼容旧格式: provider ID
   const provider = store.providers.find(p => p.id === binding);
   if (provider) return { platform: provider.platform };
-  
+
   // 兼容旧格式: platform name
   const providerByPlatform = store.providers.find(p => p.platform === binding);
   if (providerByPlatform) return { platform: providerByPlatform.platform };
-  
+
   // It might be a platform name that's not yet added
   return { platform: binding };
 }
@@ -98,15 +98,15 @@ export function getAllFeatureConfigs(feature: AIFeature): FeatureConfig[] {
   const store = useAPIConfigStore.getState();
   const providersWithModels = store.getProvidersForFeature(feature);
   const featureInfo = AI_FEATURES.find(f => f.key === feature);
-  
+
   const configs: FeatureConfig[] = [];
-  
+
   for (const { provider, model } of providersWithModels) {
     const keys = parseApiKeys(provider.apiKey);
     if (keys.length === 0) continue;
-    
+
     const keyManager = getProviderKeyManager(provider.id, provider.apiKey);
-    
+
     configs.push({
       feature,
       featureName: featureInfo?.name || feature,
@@ -120,7 +120,7 @@ export function getAllFeatureConfigs(feature: AIFeature): FeatureConfig[] {
       model,
     });
   }
-  
+
   return configs;
 }
 
@@ -130,9 +130,9 @@ export function getAllFeatureConfigs(feature: AIFeature): FeatureConfig[] {
  * 
  * v2: 支持多模型轮询
  */
-export function getFeatureConfig(feature: AIFeature): FeatureConfig | null {
+export function getFeatureConfig(feature: AIFeature, options?: { silent?: boolean }): FeatureConfig | null {
   const configs = getAllFeatureConfigs(feature);
-  
+
   if (configs.length === 0) {
     // Fallback: 尝试使用默认平台映射
     const store = useAPIConfigStore.getState();
@@ -160,24 +160,26 @@ export function getFeatureConfig(feature: AIFeature): FeatureConfig | null {
         }
       }
     }
-    console.warn(`[FeatureRouter] No provider bound for feature: ${feature}`);
+    if (!options?.silent) {
+      console.warn(`[FeatureRouter] No provider bound for feature: ${feature}`);
+    }
     return null;
   }
-  
+
   // 单模型直接返回
   if (configs.length === 1) {
     return configs[0];
   }
-  
+
   // 多模型轮询
   const currentIndex = featureRoundRobinIndex.get(feature) || 0;
   const config = configs[currentIndex % configs.length];
-  
+
   // 更新索引（下次调用使用下一个）
   featureRoundRobinIndex.set(feature, currentIndex + 1);
-  
+
   console.log(`[FeatureRouter] 多模型轮询: ${feature} -> ${config.provider.name}:${config.model} (${currentIndex % configs.length + 1}/${configs.length})`);
-  
+
   return config;
 }
 
@@ -243,11 +245,11 @@ export async function callFeatureAPI(
 ): Promise<string> {
   // 使用指定配置或轮询获取
   const config = options?.configOverride || getFeatureConfig(feature);
-  
+
   if (!config) {
     throw new Error(getFeatureNotConfiguredMessage(feature));
   }
-  
+
   // 从服务映射获取模型
   const model = options?.modelOverride || config.model || config.models?.[0];
   const baseUrl = config.baseUrl?.replace(/\/+$/, '');
@@ -257,12 +259,12 @@ export async function callFeatureAPI(
   if (!model) {
     throw new Error('请先在设置中配置模型');
   }
-  
+
   console.log(`[callFeatureAPI] 功能: ${feature}`);
   console.log(`[callFeatureAPI] 供应商: ${config.provider.name} (${config.platform})`);
   console.log(`[callFeatureAPI] 模型: ${model}`);
   console.log(`[callFeatureAPI] BaseURL: ${baseUrl}`);
-  
+
   // 调用底层 API
   // 结构化 JSON 输出任务默认关闭深度思考，避免 reasoning 耗尽 token
   const disableThinking = options?.disableThinking ?? true;
@@ -284,16 +286,16 @@ export async function callFeatureAPI(
 export function useFeatureConfig(feature: AIFeature): FeatureConfig | null {
   const getProviderForFeature = useAPIConfigStore(state => state.getProviderForFeature);
   const provider = getProviderForFeature(feature);
-  
+
   if (!provider) return null;
-  
+
   const keys = parseApiKeys(provider.apiKey);
   if (keys.length === 0) return null;
-  
+
   const featureInfo = AI_FEATURES.find(f => f.key === feature);
   const keyManager = getProviderKeyManager(provider.id, provider.apiKey);
   const model = provider.model?.[0] || '';
-  
+
   return {
     feature,
     featureName: featureInfo?.name || feature,
@@ -319,11 +321,11 @@ export function getAllFeatureStatuses(): Array<{
   providerName?: string;
 }> {
   const store = useAPIConfigStore.getState();
-  
+
   return AI_FEATURES.map(f => {
     const provider = store.getProviderForFeature(f.key);
     const configured = store.isFeatureConfigured(f.key);
-    
+
     return {
       feature: f.key,
       name: f.name,

@@ -14,6 +14,7 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
+import { useResolvedImageUrl } from "@/hooks/use-resolved-image-url";
 import {
   HORIZONTAL_DIRECTIONS,
   ELEVATION_ANGLES,
@@ -70,15 +71,18 @@ export function AngleController({
   isLoading = false,
   compact = false,
 }: AngleControllerProps) {
+  // Resolve idb-image:// URLs for display
+  const resolvedPreviewUrl = useResolvedImageUrl(previewUrl || '');
+
   // 状态管理
   const [direction, setDirection] = useState<HorizontalDirection>(initialDirection);
   const [elevation, setElevation] = useState<ElevationAngle>(initialElevation);
   const [shotSize, setShotSize] = useState<ShotSize>(initialShotSize);
-  
+
   // 连续的视角参数 (用于渲染动画)
   const [theta, setTheta] = useState(45); // 水平 0-360
   const [phi, setPhi] = useState(90);    // 垂直 30-150
-  
+
   // 图片比例状态
   const [imgAspectRatio, setImgAspectRatio] = useState(16 / 9); // 默认宽屏
 
@@ -86,7 +90,7 @@ export function AngleController({
   const [isDragging, setIsDragging] = useState(false);
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
   const [cubeRotation, setCubeRotation] = useState(0);
-  
+
   const containerRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number>();
 
@@ -98,7 +102,7 @@ export function AngleController({
   useEffect(() => {
     const dir = HORIZONTAL_DIRECTIONS.find(d => d.id === initialDirection);
     const elevIdx = ELEVATION_ANGLES.findIndex(e => e.id === initialElevation);
-    
+
     if (dir) setTheta(dir.degrees);
     // 粗略映射 elevation 到 phi
     // low(0)->130, eye(1)->90, elevated(2)->60, high(3)->40
@@ -126,7 +130,7 @@ export function AngleController({
     const normalizedTheta = ((t % 360) + 360) % 360;
     const dirIndex = Math.round(normalizedTheta / 45) % 8;
     const snappedTheta = dirIndex * 45;
-    
+
     // 2. 垂直方向吸附
     // mapping: low-angle(130), eye-level(90), elevated(60), high-angle(40)
     let elevIndex = 1; // default eye-level
@@ -145,16 +149,16 @@ export function AngleController({
       setDirection(newDir.id);
       setElevation(newElev.id);
       setShotSize(sSize);
-      
+
       // 触发外部回调
       const prompt = generateAnglePrompt(newDir.id, newElev.id, sSize);
       const label = getAngleLabel(newDir.id, newElev.id, sSize);
-      onAngleChange?.({ 
-        direction: newDir.id, 
-        elevation: newElev.id, 
-        shotSize: sSize, 
-        prompt, 
-        label 
+      onAngleChange?.({
+        direction: newDir.id,
+        elevation: newElev.id,
+        shotSize: sSize,
+        prompt,
+        label
       });
     }
 
@@ -166,19 +170,19 @@ export function AngleController({
   const handleDrag = useCallback((clientX: number, clientY: number) => {
     const deltaX = clientX - lastMousePos.x;
     const deltaY = clientY - lastMousePos.y;
-    
+
     setLastMousePos({ x: clientX, y: clientY });
 
     // 调整灵敏度：更低的值 = 更“重”的手感
     const sensitivity = 0.5;
-    
+
     setTheta(prev => (prev + deltaX * sensitivity) % 360);
     setPhi(prev => Math.max(30, Math.min(150, prev - deltaY * sensitivity)));
-    
+
     // 实时计算吸附结果
     snapToGrid(
-      theta + deltaX * sensitivity, 
-      phi - deltaY * sensitivity, 
+      theta + deltaX * sensitivity,
+      phi - deltaY * sensitivity,
       shotSize
     );
   }, [lastMousePos, theta, phi, shotSize, snapToGrid]);
@@ -188,15 +192,15 @@ export function AngleController({
   handleWheelRef.current = (e: WheelEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    
+
     const delta = e.deltaY;
     const sizes: ShotSize[] = ['close-up', 'medium-shot', 'wide-shot'];
     const currentIndex = sizes.indexOf(shotSize);
-    
+
     let newIndex = currentIndex;
     if (delta > 0 && currentIndex < 2) newIndex++; // 向下滚 -> 缩小/变远 (Wide)
     if (delta < 0 && currentIndex > 0) newIndex--; // 向上滚 -> 放大/变近 (Close)
-    
+
     if (newIndex !== currentIndex) {
       const newSize = sizes[newIndex];
       setShotSize(newSize);
@@ -211,7 +215,7 @@ export function AngleController({
 
     const wheelHandler = (e: WheelEvent) => handleWheelRef.current?.(e);
     container.addEventListener('wheel', wheelHandler, { passive: false });
-    
+
     return () => {
       container.removeEventListener('wheel', wheelHandler);
     };
@@ -275,7 +279,7 @@ export function AngleController({
   // 计算当前视觉位置
   const controllerPos = sphericalToCartesian(theta, phi, radius);
   const projectedController = project3D(controllerPos.x, controllerPos.y, controllerPos.z);
-  
+
   // 计算当前方向索引（用于高亮LED灯）
   const directionIndex = Math.round(((theta % 360) + 360) % 360 / 45) % 8;
 
@@ -325,7 +329,7 @@ export function AngleController({
         </svg>
 
         {/* 2. 中央3D预览卡片 (交互核心) */}
-        <div 
+        <div
           className="absolute pointer-events-none flex items-center justify-center"
           style={{
             left: 0,
@@ -346,8 +350,7 @@ export function AngleController({
               transform: `
                 rotateX(${-(phi - 90)}deg)
                 rotateY(${theta}deg)
-                scale(${
-                  shotSize === 'close-up' ? 1.2 : 
+                scale(${shotSize === 'close-up' ? 1.2 :
                   shotSize === 'medium-shot' ? 1.0 : 0.8
                 })
               `,
@@ -358,7 +361,7 @@ export function AngleController({
               <>
                 <div className="absolute inset-0 rounded-[8px] overflow-hidden bg-zinc-900 border border-white/10">
                   <img
-                    src={previewUrl}
+                    src={resolvedPreviewUrl || previewUrl}
                     className={cn("w-full h-full object-fill", isLoading && "opacity-50 blur-sm")}
                     alt="preview"
                     onLoad={(e) => {
@@ -369,17 +372,17 @@ export function AngleController({
                     }}
                   />
                 </div>
-                
+
                 {/* 玻璃反光效果 */}
-                <div 
+                <div
                   className="absolute inset-0 rounded-[8px] bg-gradient-to-tr from-white/10 via-transparent to-transparent pointer-events-none mix-blend-overlay"
                   style={{
                     opacity: Math.max(0, Math.sin(theta * Math.PI / 180)) * 0.5
-                  }} 
+                  }}
                 />
-                
+
                 {/* 3D厚度/边框效果 */}
-                <div 
+                <div
                   className="absolute inset-0 rounded-[8px] border border-white/20 pointer-events-none"
                   style={{ transform: 'translateZ(1px)' }}
                 />
@@ -393,7 +396,7 @@ export function AngleController({
         </div>
 
         {/* 3. 外围指示器层 */}
-        
+
         {/* 圆形轨道 */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="absolute rounded-full border border-white/10" style={{ width: radius * 2, height: radius * 2 }} />
@@ -421,7 +424,7 @@ export function AngleController({
 
         {/* 激光连接线 */}
         <svg className="absolute inset-0 pointer-events-none" width={size} height={size}>
-           <line
+          <line
             x1={projectedController.x} y1={projectedController.y}
             x2={size / 2} y2={size / 2}
             stroke="#ccff00"
@@ -451,7 +454,7 @@ export function AngleController({
             <div className="absolute inset-0 bg-white/30 rounded-sm" />
           </div>
         </div>
-        
+
         {/* 加载中覆盖层 */}
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-50">
@@ -467,18 +470,18 @@ export function AngleController({
         </span>
         <div className="w-px h-3 bg-white/10" />
         <div className="flex gap-1">
-           {SHOT_SIZES.map(s => (
-             <div 
-               key={s.id} 
-               className={cn(
-                 "w-1.5 h-1.5 rounded-full transition-colors", 
-                 shotSize === s.id ? "bg-[#ccff00]" : "bg-white/20"
-               )} 
-             />
-           ))}
+          {SHOT_SIZES.map(s => (
+            <div
+              key={s.id}
+              className={cn(
+                "w-1.5 h-1.5 rounded-full transition-colors",
+                shotSize === s.id ? "bg-[#ccff00]" : "bg-white/20"
+              )}
+            />
+          ))}
         </div>
       </div>
-      
+
       {!compact && (
         <div className="text-[9px] text-zinc-500 font-mono">
           [拖拽] 旋转 · [滚轮] 缩放

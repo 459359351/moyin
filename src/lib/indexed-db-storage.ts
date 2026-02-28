@@ -33,7 +33,7 @@ const hasRichData = (jsonStr: string | null): boolean => {
   try {
     const data = JSON.parse(jsonStr);
     const state = data.state || data;
-    
+
     // Check common store patterns for meaningful data
     if (state.projects && Array.isArray(state.projects) && state.projects.length > 1) return true;
     if (state.splitScenes && Array.isArray(state.splitScenes) && state.splitScenes.length > 0) return true;
@@ -41,7 +41,7 @@ const hasRichData = (jsonStr: string | null): boolean => {
     if (state.episodes && Array.isArray(state.episodes) && state.episodes.length > 0) return true;
     if (state.characters && Array.isArray(state.characters) && state.characters.length > 0) return true;
     if (state.media && Array.isArray(state.media) && state.media.length > 0) return true;
-    
+
     // For director store, check nested project data
     if (state.projects && typeof state.projects === 'object') {
       for (const projectId of Object.keys(state.projects)) {
@@ -50,7 +50,7 @@ const hasRichData = (jsonStr: string | null): boolean => {
         if (proj.screenplay) return true;
       }
     }
-    
+
     // Check data size as fallback (more than 1KB likely has real data)
     return jsonStr.length > 1000;
   } catch {
@@ -72,16 +72,16 @@ export const fileStorage: StateStorage = {
         } catch (e) {
           // IndexedDB not available
         }
-        
+
         console.log(`[Storage] Data sizes for ${name}: file=${fileData?.length || 0}, local=${localData?.length || 0}, idb=${idbData?.length || 0}`);
-        
+
         // Determine which data source has the richest data
         const fileHasData = hasRichData(fileData);
         const localHasData = hasRichData(localData);
         const idbHasData = hasRichData(idbData);
-        
+
         console.log(`[Storage] Rich data check for ${name}: file=${fileHasData}, local=${localHasData}, idb=${idbHasData}`);
-        
+
         // Priority: localStorage > IndexedDB > file (for migration)
         // If localStorage or IndexedDB has richer data, migrate it
         if (localHasData && !fileHasData) {
@@ -91,7 +91,7 @@ export const fileStorage: StateStorage = {
           console.log(`[Storage] Migration complete for ${name}`);
           return localData;
         }
-        
+
         if (idbHasData && !fileHasData && !localHasData) {
           console.log(`[Storage] Migrating ${name} from IndexedDB to file storage (richer data)...`);
           await window.fileStorage!.setItem(name, idbData!);
@@ -99,7 +99,7 @@ export const fileStorage: StateStorage = {
           console.log(`[Storage] Migration complete for ${name}`);
           return idbData;
         }
-        
+
         // Clean up old data if file storage has the data
         if (fileHasData) {
           if (localData) {
@@ -112,15 +112,33 @@ export const fileStorage: StateStorage = {
           }
           return fileData;
         }
-        
+
         // Return whatever we have
         return fileData || localData || idbData || null;
       } catch (error) {
         console.error('File storage getItem error:', error);
       }
     }
-    // Fallback to localStorage (browser mode)
-    return localStorage.getItem(name);
+    // Browser mode: try IndexedDB first (unlimited storage), then localStorage (legacy migration)
+    try {
+      const idbData = await getFromIndexedDB(name);
+      if (idbData) return idbData;
+    } catch {
+      // IndexedDB not available
+    }
+    // Check localStorage for legacy data and migrate to IndexedDB
+    const localData = localStorage.getItem(name);
+    if (localData) {
+      console.log(`[Storage] Migrating ${name} from localStorage to IndexedDB (browser mode)...`);
+      try {
+        await saveToIndexedDB(name, localData);
+        localStorage.removeItem(name);
+        console.log(`[Storage] Browser migration complete for ${name}`);
+      } catch {
+        // Migration failed, still return the data
+      }
+    }
+    return localData;
   },
 
   setItem: async (name: string, value: string): Promise<void> => {
@@ -134,11 +152,19 @@ export const fileStorage: StateStorage = {
         console.error('[Storage] File storage setItem error:', error);
       }
     }
-    // Fallback to localStorage
+    // Browser mode: use IndexedDB (no 5MB limit like localStorage)
     try {
-      localStorage.setItem(name, value);
+      await saveToIndexedDB(name, value);
+      // Clean up localStorage if data was migrated
+      try { localStorage.removeItem(name); } catch { }
     } catch (error) {
-      console.error('localStorage setItem error:', error);
+      console.error('[Storage] IndexedDB setItem error, trying localStorage:', error);
+      // Last resort: try localStorage (may fail for large data)
+      try {
+        localStorage.setItem(name, value);
+      } catch (lsError) {
+        console.error('[Storage] localStorage setItem also failed (QuotaExceeded):', lsError);
+      }
     }
   },
 
@@ -151,50 +177,106 @@ export const fileStorage: StateStorage = {
         console.error('File storage removeItem error:', error);
       }
     }
-    localStorage.removeItem(name);
+    // Browser mode: clean up from both IndexedDB and localStorage
+    try { await removeFromIndexedDB(name); } catch { }
+    try { localStorage.removeItem(name); } catch { }
   },
 };
 
-// Helper to get data from IndexedDB (for migration)
-const getFromIndexedDB = (name: string): Promise<string | null> => {
-  return new Promise((resolve) => {
+// Helper: open IndexedDB with auto-creation of object store
+const openIDB = (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
     try {
-      const request = indexedDB.open('moyin-creator-db', 1);
-      request.onerror = () => resolve(null);
-      request.onsuccess = () => {
+      const request = indexedDB.open('moyin-creator-db');
+      request.onerror = () => reject(request.error);
+      request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains('zustand-storage')) {
-          resolve(null);
-          return;
+          db.createObjectStore('zustand-storage');
         }
-        const transaction = db.transaction('zustand-storage', 'readonly');
-        const store = transaction.objectStore('zustand-storage');
-        const getRequest = store.get(name);
-        getRequest.onerror = () => resolve(null);
-        getRequest.onsuccess = () => resolve(getRequest.result ?? null);
       };
+      request.onsuccess = () => {
+        const db = request.result;
+        // If the DB was created by another module without the 'zustand-storage' store,
+        // we need to close and reopen with a bumped version to trigger onupgradeneeded.
+        if (!db.objectStoreNames.contains('zustand-storage')) {
+          const currentVersion = db.version;
+          db.close();
+          const upgradeRequest = indexedDB.open('moyin-creator-db', currentVersion + 1);
+          upgradeRequest.onerror = () => reject(upgradeRequest.error);
+          upgradeRequest.onupgradeneeded = () => {
+            const upgradeDb = upgradeRequest.result;
+            if (!upgradeDb.objectStoreNames.contains('zustand-storage')) {
+              upgradeDb.createObjectStore('zustand-storage');
+            }
+          };
+          upgradeRequest.onsuccess = () => resolve(upgradeRequest.result);
+        } else {
+          resolve(db);
+        }
+      };
+    } catch (e) {
+      reject(e);
+    }
+  });
+};
+
+// Helper to get data from IndexedDB
+const getFromIndexedDB = (name: string): Promise<string | null> => {
+  return new Promise(async (resolve) => {
+    try {
+      const db = await openIDB();
+      if (!db.objectStoreNames.contains('zustand-storage')) {
+        db.close();
+        resolve(null);
+        return;
+      }
+      const transaction = db.transaction('zustand-storage', 'readonly');
+      const store = transaction.objectStore('zustand-storage');
+      const getRequest = store.get(name);
+      getRequest.onerror = () => { db.close(); resolve(null); };
+      getRequest.onsuccess = () => { db.close(); resolve(getRequest.result ?? null); };
     } catch {
       resolve(null);
     }
   });
 };
 
-const removeFromIndexedDB = (name: string): Promise<void> => {
-  return new Promise((resolve) => {
+// Helper to save data to IndexedDB
+const saveToIndexedDB = (name: string, value: string): Promise<void> => {
+  return new Promise(async (resolve, reject) => {
     try {
-      const request = indexedDB.open('moyin-creator-db', 1);
-      request.onerror = () => resolve();
-      request.onsuccess = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains('zustand-storage')) {
-          resolve();
-          return;
-        }
-        const transaction = db.transaction('zustand-storage', 'readwrite');
-        const store = transaction.objectStore('zustand-storage');
-        store.delete(name);
+      const db = await openIDB();
+      if (!db.objectStoreNames.contains('zustand-storage')) {
+        db.close();
+        reject(new Error('zustand-storage object store not found after openIDB'));
+        return;
+      }
+      const transaction = db.transaction('zustand-storage', 'readwrite');
+      const store = transaction.objectStore('zustand-storage');
+      const putRequest = store.put(value, name);
+      putRequest.onerror = () => { db.close(); reject(putRequest.error); };
+      putRequest.onsuccess = () => { db.close(); resolve(); };
+    } catch (e) {
+      reject(e);
+    }
+  });
+};
+
+const removeFromIndexedDB = (name: string): Promise<void> => {
+  return new Promise(async (resolve) => {
+    try {
+      const db = await openIDB();
+      if (!db.objectStoreNames.contains('zustand-storage')) {
+        db.close();
         resolve();
-      };
+        return;
+      }
+      const transaction = db.transaction('zustand-storage', 'readwrite');
+      const store = transaction.objectStore('zustand-storage');
+      store.delete(name);
+      db.close();
+      resolve();
     } catch {
       resolve();
     }

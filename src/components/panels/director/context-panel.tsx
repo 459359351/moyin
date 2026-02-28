@@ -56,12 +56,12 @@ export function DirectorContextPanel() {
   const { addScenesFromScript } = useDirectorStore();
   const { resourceSharing } = useAppSettingsStore();
   const { activeProjectId } = useProjectStore();
-  
+
   // Get current project data
   const projectData = useActiveDirectorProject();
   const splitScenes = projectData?.splitScenes || [];
   const storyboardStatus = projectData?.storyboardStatus || 'idle';
-  
+
   // 获取场景库数据
   const { scenes } = useSceneStore();
   const sceneLibraryScenes = useMemo(() => {
@@ -77,7 +77,7 @@ export function DirectorContextPanel() {
 
   const scriptData = scriptProject?.scriptData || null;
   const shots = scriptProject?.shots || [];
-  const styleId = scriptProject?.styleId || "ghibli";
+  const styleId = scriptProject?.styleId || "2d_animation";
 
   // 如果没有episodes，创建一个默认的
   const episodes = useMemo(() => {
@@ -134,26 +134,26 @@ export function DirectorContextPanel() {
     if (!activeProjectId) return [];
     return characters.filter((c) => c.projectId === activeProjectId);
   }, [characters, resourceSharing.shareCharacters, activeProjectId]);
-  
+
   // 将剧本角色ID或角色名称映射到角色库ID
   const mapScriptCharacterIdsToLibraryIds = (scriptCharIds: string[], characterNames?: string[]): string[] => {
     const libraryIds: string[] = [];
     const addedIds = new Set<string>(); // 避免重复
-    
+
     // 1. 先通过 characterIds 匹配
     if (scriptCharIds && scriptCharIds.length > 0 && scriptData) {
       for (const scriptCharId of scriptCharIds) {
         // 查找剧本角色
         const scriptChar = scriptData.characters.find(c => c.id === scriptCharId);
         if (!scriptChar) continue;
-        
+
         // 优先使用已关联的角色库ID
         if (scriptChar.characterLibraryId && !addedIds.has(scriptChar.characterLibraryId)) {
           libraryIds.push(scriptChar.characterLibraryId);
           addedIds.add(scriptChar.characterLibraryId);
           continue;
         }
-        
+
         // 否则通过名字匹配角色库中的角色
         const libraryChar = libraryCharacters.find(c => c.name === scriptChar.name);
         if (libraryChar && !addedIds.has(libraryChar.id)) {
@@ -162,22 +162,22 @@ export function DirectorContextPanel() {
         }
       }
     }
-    
+
     // 2. 再通过 characterNames 补充匹配（AI校准的分镜可能只有名称）
     if (characterNames && characterNames.length > 0) {
       for (const charName of characterNames) {
         if (!charName) continue;
-        
+
         // 精确匹配
         let libraryChar = libraryCharacters.find(c => c.name === charName);
-        
+
         // 模糊匹配：角色库名称包含分镜角色名，或分镜角色名包含角色库名称
         if (!libraryChar) {
-          libraryChar = libraryCharacters.find(c => 
+          libraryChar = libraryCharacters.find(c =>
             c.name.includes(charName) || charName.includes(c.name)
           );
         }
-        
+
         if (libraryChar && !addedIds.has(libraryChar.id)) {
           libraryIds.push(libraryChar.id);
           addedIds.add(libraryChar.id);
@@ -185,33 +185,33 @@ export function DirectorContextPanel() {
         }
       }
     }
-    
+
     return libraryIds;
   };
-  
+
   // 根据分镜和场景信息查找匹配的场景库视角
   // 优先使用AI分析的shotIds关联，保底用分镜序号对应视角序号
   const findMatchingSceneAndViewpointQuick = (shot: Shot, scene: ScriptScene, shotIndexInScene?: number): ViewpointMatchResult | null => {
     const sceneName = scene.name || '';
-    
+
     // 找到场景库中匹配的父场景
-    const parentScene = sceneLibraryScenes.find(s => 
+    const parentScene = sceneLibraryScenes.find(s =>
       !s.parentSceneId && !s.isViewpointVariant &&
       (s.name.includes(sceneName) || sceneName.includes(s.name))
     );
-    
+
     if (!parentScene) {
       console.log(`[findMatchingSceneAndViewpointQuick] 未找到匹配的父场景: "${sceneName}"`);
       return null;
     }
-    
+
     // 获取该父场景的所有视角变体，按创建时间排序
     const variants = sceneLibraryScenes
       .filter(s => s.parentSceneId === parentScene.id)
       .sort((a, b) => a.createdAt - b.createdAt);
-    
+
     console.log(`[findMatchingSceneAndViewpointQuick] 场景 "${sceneName}" 有 ${variants.length} 个视角变体`);
-    
+
     if (variants.length === 0) {
       // 没有视角变体，返回父场景
       return {
@@ -223,7 +223,7 @@ export function DirectorContextPanel() {
         confidence: 0.5,
       };
     }
-    
+
     // 方案一：优先检查场景库视角变体的shotIds（切割时保存的）
     const variantWithShot = variants.find(v => v.shotIds?.includes(shot.id));
     if (variantWithShot) {
@@ -237,7 +237,7 @@ export function DirectorContextPanel() {
         confidence: 0.98,
       };
     }
-    
+
     // 方案二：检查剧本scene.viewpoints的shotIds（AI分析时保存的）
     if (scene.viewpoints && scene.viewpoints.length > 0) {
       const matchedViewpoint = scene.viewpoints.find(v => v.shotIds?.includes(shot.id));
@@ -260,18 +260,18 @@ export function DirectorContextPanel() {
         }
       }
     }
-    
+
     // 方案三：保底 - 按分镜序号对应视角变体序号
     // 分镜1 -> 视角1，分镜2 -> 视角2，...
     // 如果分镜数超过视角数，循环使用
-    const variantIndex = shotIndexInScene !== undefined 
-      ? shotIndexInScene % variants.length 
+    const variantIndex = shotIndexInScene !== undefined
+      ? shotIndexInScene % variants.length
       : 0;
-    
+
     const matchedVariant = variants[variantIndex];
-    
+
     console.log(`[findMatchingSceneAndViewpointQuick] 通过序号匹配: 分镜序号 ${(shotIndexInScene ?? 0) + 1} -> 视角变体 ${variantIndex + 1}: "${matchedVariant.viewpointName || matchedVariant.name}"`);
-    
+
     return {
       sceneLibraryId: matchedVariant.id,
       viewpointId: matchedVariant.viewpointId,
@@ -281,28 +281,28 @@ export function DirectorContextPanel() {
       confidence: 0.9,
     };
   };
-  
+
   // 在场景库中查找匹配的视角
   const findViewpointInLibrary = (sceneName: string, viewpointName: string): ViewpointMatchResult | null => {
     console.log(`[findViewpointInLibrary] 查找场景: "${sceneName}", 视角: "${viewpointName}"`);
     console.log(`[findViewpointInLibrary] 场景库总数: ${sceneLibraryScenes.length}`);
-    
+
     // 找到匹配的父场景
-    const parentScenes = sceneLibraryScenes.filter(s => 
+    const parentScenes = sceneLibraryScenes.filter(s =>
       !s.parentSceneId && !s.isViewpointVariant &&
       (s.name.includes(sceneName) || sceneName.includes(s.name))
     );
-    
+
     console.log(`[findViewpointInLibrary] 匹配的父场景数: ${parentScenes.length}`, parentScenes.map(s => s.name));
-    
+
     if (parentScenes.length === 0) return null;
-    
+
     // 在父场景的视角变体中查找匹配的视角
     for (const parent of parentScenes) {
       const variants = sceneLibraryScenes.filter(s => s.parentSceneId === parent.id);
-      console.log(`[findViewpointInLibrary] 父场景 "${parent.name}" 的视角变体数: ${variants.length}`, 
+      console.log(`[findViewpointInLibrary] 父场景 "${parent.name}" 的视角变体数: ${variants.length}`,
         variants.map(v => ({ name: v.name, viewpointName: v.viewpointName, id: v.id })));
-      
+
       // 模糊匹配视角名称
       const matchedVariant = variants.find(v => {
         const variantName = v.viewpointName || v.name || '';
@@ -310,7 +310,7 @@ export function DirectorContextPanel() {
         console.log(`[findViewpointInLibrary] 对比: "${variantName}" vs "${viewpointName}" => ${isMatch}`);
         return isMatch;
       });
-      
+
       if (matchedVariant) {
         console.log(`[findViewpointInLibrary] ✅ 匹配成功: ${matchedVariant.viewpointName || matchedVariant.name}`);
         console.log(`[findViewpointInLibrary] 图片字段:`, {
@@ -328,7 +328,7 @@ export function DirectorContextPanel() {
         };
       }
     }
-    
+
     console.log(`[findViewpointInLibrary] ❌ 未找到视角，返回父场景`);
     // 没找到视角，返回父场景
     const bestParent = parentScenes[0];
@@ -341,7 +341,7 @@ export function DirectorContextPanel() {
       confidence: 0.5,
     };
   };
-  
+
   // 异步版本：关键词 + AI 匹配（用于批量添加）
   const findMatchingSceneAndViewpointWithAI = async (sceneName: string, actionSummary: string): Promise<ViewpointMatchResult | null> => {
     return matchSceneAndViewpoint(sceneName, actionSummary, sceneLibraryScenes, true);
@@ -369,17 +369,17 @@ export function DirectorContextPanel() {
       if (shot.actionSummary) parts.push(shot.actionSummary);
       promptZh = parts.join(' - ');
     }
-    
+
     // 将剧本角色ID/名称映射到角色库ID
     const characterLibraryIds = mapScriptCharacterIdsToLibraryIds(shot.characterIds || [], shot.characterNames);
-    
+
     // 获取分镜在场景内的序号
     const sceneShots = shotsByScene[scene.id] || [];
     const shotIndexInScene = sceneShots.findIndex(s => s.id === shot.id);
-    
+
     // 自动匹配场景库中的场景和视角（优先使用已有的视角关联）
     const sceneMatch = findMatchingSceneAndViewpointQuick(shot, scene, shotIndexInScene >= 0 ? shotIndexInScene : undefined);
-    
+
     addScenesFromScript([{
       // 场景信息
       sceneName: sceneMatch?.matchedSceneName || scene.name || '',
@@ -444,7 +444,7 @@ export function DirectorContextPanel() {
       focalLength: shot.focalLength,
       photographyTechnique: shot.photographyTechnique,
     }]);
-    
+
     const matchInfo = sceneMatch ? ` (匹配: ${sceneMatch.matchedSceneName})` : '';
     toast.success(`已添加分镜到编辑列表${matchInfo}`);
   };
@@ -452,12 +452,12 @@ export function DirectorContextPanel() {
   // 添加整个场景的所有分镜到分镜编辑（模式二）
   const handleAddSceneToSplitScenes = (scene: ScriptScene) => {
     const sceneShots = shotsByScene[scene.id] || [];
-    
+
     if (sceneShots.length === 0) {
       toast.error('该场景没有分镜');
       return;
     }
-    
+
     let matchedCount = 0;
     const scenesToAdd = sceneShots.map((shot, shotIndexInScene) => {
       // 使用详细的视觉描述作为提示词（优先）
@@ -468,14 +468,14 @@ export function DirectorContextPanel() {
         if (shot.actionSummary) parts.push(shot.actionSummary);
         promptZh = parts.join(' - ');
       }
-      
+
       // 将剧本角色ID/名称映射到角色库ID
       const characterLibraryIds = mapScriptCharacterIdsToLibraryIds(shot.characterIds || [], shot.characterNames);
-      
+
       // 自动匹配场景库中的场景和视角（优先使用已有的视角关联，保底用序号）
       const sceneMatch = findMatchingSceneAndViewpointQuick(shot, scene, shotIndexInScene);
       if (sceneMatch) matchedCount++;
-      
+
       return {
         // 场景信息
         sceneName: sceneMatch?.matchedSceneName || scene.name || '',
@@ -541,7 +541,7 @@ export function DirectorContextPanel() {
         photographyTechnique: shot.photographyTechnique,
       };
     });
-    
+
     addScenesFromScript(scenesToAdd);
     const matchInfo = matchedCount > 0 ? ` (${matchedCount}个已匹配场景库)` : '';
     toast.success(`已添加 ${scenesToAdd.length} 个分镜到编辑列表${matchInfo}`);

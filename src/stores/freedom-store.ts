@@ -24,7 +24,7 @@ export interface HistoryEntry {
 interface FreedomState {
   // Studio mode
   activeStudio: StudioMode;
-  
+
   // Image studio
   imagePrompt: string;
   selectedImageModel: string;
@@ -33,7 +33,7 @@ interface FreedomState {
   imageExtraParams: Record<string, any>;
   imageResult: string | null;
   imageGenerating: boolean;
-  
+
   // Video studio
   videoPrompt: string;
   selectedVideoModel: string;
@@ -42,7 +42,7 @@ interface FreedomState {
   videoResolution: string;
   videoResult: string | null;
   videoGenerating: boolean;
-  
+
   // Cinema studio
   cinemaPrompt: string;
   selectedCamera: string;
@@ -51,7 +51,7 @@ interface FreedomState {
   selectedAperture: string;
   cinemaResult: string | null;
   cinemaGenerating: boolean;
-  
+
   // History
   imageHistory: HistoryEntry[];
   videoHistory: HistoryEntry[];
@@ -60,7 +60,7 @@ interface FreedomState {
 
 interface FreedomActions {
   setActiveStudio: (studio: StudioMode) => void;
-  
+
   // Image studio actions
   setImagePrompt: (prompt: string) => void;
   setSelectedImageModel: (model: string) => void;
@@ -69,7 +69,7 @@ interface FreedomActions {
   setImageExtraParams: (params: Record<string, any>) => void;
   setImageResult: (url: string | null) => void;
   setImageGenerating: (generating: boolean) => void;
-  
+
   // Video studio actions
   setVideoPrompt: (prompt: string) => void;
   setSelectedVideoModel: (model: string) => void;
@@ -78,7 +78,7 @@ interface FreedomActions {
   setVideoResolution: (resolution: string) => void;
   setVideoResult: (url: string | null) => void;
   setVideoGenerating: (generating: boolean) => void;
-  
+
   // Cinema studio actions
   setCinemaPrompt: (prompt: string) => void;
   setSelectedCamera: (camera: string) => void;
@@ -87,7 +87,7 @@ interface FreedomActions {
   setSelectedAperture: (aperture: string) => void;
   setCinemaResult: (url: string | null) => void;
   setCinemaGenerating: (generating: boolean) => void;
-  
+
   // History actions
   addHistoryEntry: (entry: HistoryEntry) => void;
   removeHistoryEntry: (id: string) => void;
@@ -102,7 +102,7 @@ const MAX_HISTORY = 50;
 
 const initialState: FreedomState = {
   activeStudio: 'image',
-  
+
   imagePrompt: '',
   selectedImageModel: 'nano-banana-pro',
   imageAspectRatio: '16:9',
@@ -110,7 +110,7 @@ const initialState: FreedomState = {
   imageExtraParams: {},
   imageResult: null,
   imageGenerating: false,
-  
+
   videoPrompt: '',
   selectedVideoModel: 'seedance-pro-t2v',
   videoAspectRatio: '16:9',
@@ -118,7 +118,7 @@ const initialState: FreedomState = {
   videoResolution: '720p',
   videoResult: null,
   videoGenerating: false,
-  
+
   cinemaPrompt: '',
   selectedCamera: 'Modular 8K Digital',
   selectedLens: 'Fast Prime Cine',
@@ -126,7 +126,7 @@ const initialState: FreedomState = {
   selectedAperture: 'f/2.8',
   cinemaResult: null,
   cinemaGenerating: false,
-  
+
   imageHistory: [],
   videoHistory: [],
   cinemaHistory: [],
@@ -173,8 +173,8 @@ export const useFreedomStore = create<FreedomStore>()(
         const historyKey = entry.type === 'image'
           ? 'imageHistory'
           : entry.type === 'video'
-          ? 'videoHistory'
-          : 'cinemaHistory';
+            ? 'videoHistory'
+            : 'cinemaHistory';
         set((state) => {
           const current = state[historyKey as keyof FreedomState] as HistoryEntry[];
           const updated = [entry, ...current].slice(0, MAX_HISTORY);
@@ -194,14 +194,36 @@ export const useFreedomStore = create<FreedomStore>()(
         const key = type === 'image'
           ? 'imageHistory'
           : type === 'video'
-          ? 'videoHistory'
-          : 'cinemaHistory';
+            ? 'videoHistory'
+            : 'cinemaHistory';
         set({ [key]: [] });
       },
     }),
     {
       name: 'moyin-freedom',
-      version: 1,
+      version: 2,
+      // Exclude transient runtime states from persistence.
+      // When the page is closed during generation, these flags must NOT persist
+      // as `true` — otherwise the UI gets permanently stuck in "generating" state.
+      // History entries and user settings are still persisted.
+      partialize: (state) => {
+        const { imageGenerating, videoGenerating, cinemaGenerating,
+          imageResult, videoResult, cinemaResult,
+          ...persisted } = state;
+        return persisted;
+      },
+      migrate: (persisted: any, version: number) => {
+        if (version < 2) {
+          // Clean up stale generating flags from v1
+          persisted.imageGenerating = false;
+          persisted.videoGenerating = false;
+          persisted.cinemaGenerating = false;
+          persisted.imageResult = null;
+          persisted.videoResult = null;
+          persisted.cinemaResult = null;
+        }
+        return persisted as FreedomStore;
+      },
     }
   )
 );

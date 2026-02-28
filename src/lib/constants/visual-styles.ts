@@ -622,7 +622,7 @@ export function getStylesByCategory(categoryId: string): StylePreset[] {
     'real': ['real'],
     'stop_motion': ['stop_motion'],
   };
-  
+
   const targetCategories = categoryMap[categoryId] || [categoryId as StyleCategory];
   return VISUAL_STYLE_PRESETS.filter(s => targetCategories.includes(s.category));
 }
@@ -657,4 +657,4 @@ export const MEDIA_TYPE_LABELS: Record<MediaType, string> = {
 export type VisualStyleId = typeof VISUAL_STYLE_PRESETS[number]['id'];
 
 /** 默认风格 ID */
-export const DEFAULT_STYLE_ID: VisualStyleId = '2d_ghibli';
+export const DEFAULT_STYLE_ID: VisualStyleId = '2d_animation';

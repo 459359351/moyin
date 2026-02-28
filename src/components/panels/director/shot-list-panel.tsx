@@ -30,6 +30,16 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { delay, RATE_LIMITS } from "@/lib/utils/rate-limiter";
 import type { Shot } from "@/types/script";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface ShotListPanelProps {
   onGenerateImage?: (shot: Shot, type: "start" | "end") => Promise<string>;
@@ -48,6 +58,7 @@ export function ShotListPanel({ onGenerateImage }: ShotListPanelProps) {
     total: number;
     message?: string;
   }>({ isVisible: false, current: 0, total: 0 });
+  const [showBatchConfirm, setShowBatchConfirm] = useState(false);
 
   const projectId = activeProjectId || "";
   const shots = scriptProject?.shots || [];
@@ -56,7 +67,7 @@ export function ShotListPanel({ onGenerateImage }: ShotListPanelProps) {
   // Group shots by scene
   const shotsByScene = useMemo(() => {
     if (!scriptData?.scenes) return new Map<string, Shot[]>();
-    
+
     const map = new Map<string, Shot[]>();
     for (const shot of shots) {
       const sceneId = String(shot.sceneRefId);
@@ -71,7 +82,7 @@ export function ShotListPanel({ onGenerateImage }: ShotListPanelProps) {
   // Stats
   const stats = useMemo(() => {
     const total = shots.length;
-    const withImage = shots.filter((s) => 
+    const withImage = shots.filter((s) =>
       s.keyframes?.find((k) => k.type === "start")?.imageUrl || s.imageUrl
     ).length;
     const withVideo = shots.filter((s) => s.videoUrl || s.interval?.videoUrl).length;
@@ -80,22 +91,14 @@ export function ShotListPanel({ onGenerateImage }: ShotListPanelProps) {
 
   const allStartFramesGenerated = stats.withImage === stats.total && stats.total > 0;
 
-  // Batch generate
-  const handleBatchGenerate = async () => {
-    if (!onGenerateImage) {
-      toast.error("图片生成服务未配置");
-      return;
-    }
-
-    const shotsToProcess = allStartFramesGenerated
+  // The actual batch generation logic
+  const runBatchGenerate = async (forceAll: boolean) => {
+    if (!onGenerateImage) return;
+    const shotsToProcess = forceAll
       ? shots
       : shots.filter((s) => !s.keyframes?.find((k) => k.type === "start")?.imageUrl && !s.imageUrl);
 
     if (shotsToProcess.length === 0) return;
-
-    if (allStartFramesGenerated && !confirm("确定要重新生成所有首帧吗？")) {
-      return;
-    }
 
     setBatchProgress({
       isVisible: true,
@@ -137,6 +140,21 @@ export function ShotListPanel({ onGenerateImage }: ShotListPanelProps) {
 
     setBatchProgress({ isVisible: false, current: 0, total: 0 });
     toast.success("批量生成完成");
+  };
+
+  // Batch generate
+  const handleBatchGenerate = async () => {
+    if (!onGenerateImage) {
+      toast.error("图片生成服务未配置");
+      return;
+    }
+
+    if (allStartFramesGenerated) {
+      setShowBatchConfirm(true);
+      return;
+    }
+
+    runBatchGenerate(false);
   };
 
   // Get scene name
@@ -364,6 +382,29 @@ export function ShotListPanel({ onGenerateImage }: ShotListPanelProps) {
           )}
         </div>
       </ScrollArea>
+
+      {/* Batch regenerate confirmation */}
+      <AlertDialog open={showBatchConfirm} onOpenChange={setShowBatchConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>重新生成所有首帧</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定要重新生成所有首帧吗？这将覆盖已有的首帧图片。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setShowBatchConfirm(false);
+                runBatchGenerate(true);
+              }}
+            >
+              确认重新生成
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

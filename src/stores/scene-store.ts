@@ -43,14 +43,14 @@ export interface Scene {
   linkedEpisodeId?: string;    // 关联的剧集ID
   createdAt: number;
   updatedAt: number;
-  
+
   // === 视角变体支持 ===
   parentSceneId?: string;     // 父场景 ID（如果是视角变体）
   viewpointId?: string;       // 视角 ID（如 'dining', 'sofa' 等）
   viewpointName?: string;     // 视角名称（如 '餐桌区', '沙发区' 等）
   shotIds?: string[];         // 关联的分镜 ID 列表
   isViewpointVariant?: boolean; // 是否是视角变体
-  
+
   // === 专业场景设计字段 ===
   architectureStyle?: string;  // 建筑风格
   colorPalette?: string;       // 色彩基调
@@ -78,24 +78,24 @@ interface SceneActions {
   updateScene: (id: string, updates: Partial<Scene>) => void;
   deleteScene: (id: string) => void;
   moveToFolder: (sceneId: string, folderId: string | null) => void;
-  
+
   // Folder CRUD
   addFolder: (name: string, parentId?: string | null, projectId?: string) => string;
   renameFolder: (id: string, name: string) => void;
   deleteFolder: (id: string) => void;
   setCurrentFolder: (id: string | null) => void;
   getOrCreateProjectFolder: (projectId: string, projectName: string) => string;
-  
+
   // Selection
   selectScene: (id: string | null) => void;
-  
+
   // Generation status
   setGenerationStatus: (status: SceneGenerationStatus, error?: string) => void;
   setGeneratingScene: (id: string | null) => void;
-  
+
   // Project scoping helpers
   assignProjectToUnscoped: (projectId: string) => void;
-  
+
   // Utilities
   getSceneById: (id: string) => Scene | undefined;
   getFolderById: (id: string) => SceneFolder | undefined;
@@ -160,18 +160,18 @@ export const useSceneStore = create<SceneStore>()(
       addScene: (sceneData) => {
         const id = `scene_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
         const now = Date.now();
-        
+
         const newScene: Scene = {
           ...sceneData,
           id,
           createdAt: now,
           updatedAt: now,
         };
-        
+
         set((state) => ({
           scenes: [...state.scenes, newScene],
         }));
-        
+
         return id;
       },
 
@@ -258,8 +258,8 @@ export const useSceneStore = create<SceneStore>()(
 
       // Generation status
       setGenerationStatus: (status, error) => {
-        set({ 
-          generationStatus: status, 
+        set({
+          generationStatus: status,
           generationError: error || null,
         });
       },
@@ -267,7 +267,7 @@ export const useSceneStore = create<SceneStore>()(
       setGeneratingScene: (id) => {
         set({ generatingSceneId: id });
       },
-      
+
       // Assign missing projectId to current project (for isolation toggle)
       assignProjectToUnscoped: (projectId) => {
         set((state) => ({
@@ -302,11 +302,12 @@ export const useSceneStore = create<SceneStore>()(
           // Don't persist large base64 images
           referenceImageBase64: undefined,
           // Safety net: strip data URLs that leaked into referenceImage
-          referenceImage: scene.referenceImage?.startsWith('data:image/')
+          // Keep local-image:// and idb-image:// (persistent identifiers)
+          referenceImage: (scene.referenceImage?.startsWith('data:image/') || scene.referenceImage?.startsWith('blob:'))
             ? undefined
             : scene.referenceImage,
           // Strip large contact sheet base64 data (should be saved locally via saveImageToLocal)
-          contactSheetImage: (scene as any).contactSheetImage?.startsWith('data:')
+          contactSheetImage: ((scene as any).contactSheetImage?.startsWith('data:') || (scene as any).contactSheetImage?.startsWith('blob:'))
             ? undefined
             : (scene as any).contactSheetImage,
           // Strip viewpointImages that contain base64 data

@@ -17,7 +17,17 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { 
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
+import {
   User,
   Image as ImageIcon,
   Edit3,
@@ -66,7 +76,7 @@ interface CharacterDetailProps {
 
 export function CharacterDetail({ character }: CharacterDetailProps) {
   const { updateCharacter, deleteCharacter, selectCharacter } = useCharacterLibraryStore();
-  
+
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState("");
   const [showWardrobe, setShowWardrobe] = useState(false);
@@ -74,6 +84,7 @@ export function CharacterDetail({ character }: CharacterDetailProps) {
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [editNotes, setEditNotes] = useState("");
   const [newTag, setNewTag] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   if (!character) {
     return (
@@ -97,11 +108,14 @@ export function CharacterDetail({ character }: CharacterDetailProps) {
   };
 
   const handleDelete = () => {
-    if (confirm(`确定要删除角色 "${character.name}" 吗？`)) {
-      deleteCharacter(character.id);
-      selectCharacter(null);
-      toast.success("角色已删除");
-    }
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    deleteCharacter(character.id);
+    selectCharacter(null);
+    setDeleteDialogOpen(false);
+    toast.success("角色已删除");
   };
 
   const handleSaveNotes = () => {
@@ -129,7 +143,7 @@ export function CharacterDetail({ character }: CharacterDetailProps) {
   const handleExportImage = async (imageUrl: string, name: string) => {
     try {
       let blob: Blob;
-      
+
       // Handle different URL formats
       if (imageUrl.startsWith('data:')) {
         // Base64 data URL
@@ -148,7 +162,7 @@ export function CharacterDetail({ character }: CharacterDetailProps) {
         const res = await fetch(imageUrl);
         blob = await res.blob();
       }
-      
+
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -212,7 +226,7 @@ export function CharacterDetail({ character }: CharacterDetailProps) {
         <div className="p-3 space-y-4">
           {/* Main preview */}
           <div className="space-y-2">
-            <div 
+            <div
               className="aspect-square rounded-lg bg-muted overflow-hidden border relative"
               draggable
               onDragStart={(e) => {
@@ -226,15 +240,15 @@ export function CharacterDetail({ character }: CharacterDetailProps) {
                 e.dataTransfer.effectAllowed = "copy";
               }}
             >
-            {currentView ? (
-                <LocalImage 
-                  src={currentView.imageUrl} 
+              {currentView ? (
+                <LocalImage
+                  src={currentView.imageUrl}
                   alt={`${character.name} - ${VIEW_LABELS[currentView.viewType] || currentView.viewType}`}
                   className="w-full h-full object-cover"
                 />
               ) : character.thumbnailUrl ? (
-                <LocalImage 
-                  src={character.thumbnailUrl} 
+                <LocalImage
+                  src={character.thumbnailUrl}
                   alt={character.name}
                   className="w-full h-full object-cover"
                 />
@@ -243,7 +257,7 @@ export function CharacterDetail({ character }: CharacterDetailProps) {
                   <User className="h-16 w-16 text-muted-foreground" />
                 </div>
               )}
-              
+
               {/* Drag hint */}
               <div className="absolute top-2 right-2 bg-black/50 text-white rounded p-1">
                 <GripVertical className="h-4 w-4" />
@@ -263,8 +277,8 @@ export function CharacterDetail({ character }: CharacterDetailProps) {
                     )}
                     onClick={() => setSelectedViewIndex(index)}
                   >
-                    <LocalImage 
-                      src={view.imageUrl} 
+                    <LocalImage
+                      src={view.imageUrl}
                       alt={VIEW_LABELS[view.viewType] || view.viewType}
                       className="w-full h-full object-cover"
                     />
@@ -279,7 +293,7 @@ export function CharacterDetail({ character }: CharacterDetailProps) {
           {/* Character info */}
           <div className="space-y-3">
             <div className="text-xs font-medium text-muted-foreground">角色信息</div>
-            
+
             {/* Basic info badges */}
             <div className="flex flex-wrap gap-1.5">
               {character.gender && (
@@ -468,6 +482,22 @@ export function CharacterDetail({ character }: CharacterDetailProps) {
         open={showWardrobe}
         onOpenChange={setShowWardrobe}
       />
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定要删除角色「{character.name}」吗？此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

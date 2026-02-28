@@ -9,6 +9,7 @@
  */
 
 import { useState } from "react";
+import { useResolvedImageUrl } from "@/hooks/use-resolved-image-url";
 import {
   Dialog,
   DialogContent,
@@ -39,25 +40,25 @@ const VARIATION_OPTIONS: {
   description: string;
   variations: string[];
 }[] = [
-  {
-    type: "angle",
-    label: "视角变体",
-    description: "同一场景的4个不同视角",
-    variations: ["正面偏左", "正面偏右", "侧面特写", "全景俯瞰"],
-  },
-  {
-    type: "composition",
-    label: "构图变体",
-    description: "同一场景的4种不同构图",
-    variations: ["全身远景", "半身中景", "面部特写", "环境交代"],
-  },
-  {
-    type: "moment",
-    label: "时刻变体",
-    description: "动作的4个时间节点",
-    variations: ["动作起始", "动作过程", "动作高潮", "动作结束"],
-  },
-];
+    {
+      type: "angle",
+      label: "视角变体",
+      description: "同一场景的4个不同视角",
+      variations: ["正面偏左", "正面偏右", "侧面特写", "全景俯瞰"],
+    },
+    {
+      type: "composition",
+      label: "构图变体",
+      description: "同一场景的4种不同构图",
+      variations: ["全身远景", "半身中景", "面部特写", "环境交代"],
+    },
+    {
+      type: "moment",
+      label: "时刻变体",
+      description: "动作的4个时间节点",
+      variations: ["动作起始", "动作过程", "动作高潮", "动作结束"],
+    },
+  ];
 
 export function QuadGridDialog({
   open,
@@ -69,6 +70,7 @@ export function QuadGridDialog({
 }: QuadGridDialogProps) {
   const [selectedType, setSelectedType] = useState<QuadVariationType>("angle");
   const [useCharacterRef, setUseCharacterRef] = useState(false);
+  const resolvedPreviewUrl = useResolvedImageUrl(previewUrl || '');
 
   const selectedOption = VARIATION_OPTIONS.find((o) => o.type === selectedType);
 
@@ -84,7 +86,7 @@ export function QuadGridDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent 
+      <DialogContent
         className="max-w-md p-4 bg-zinc-900 border-zinc-800"
         onEscapeKeyDown={(e) => isGenerating && e.preventDefault()}
         onPointerDownOutside={(e) => isGenerating && e.preventDefault()}
@@ -105,7 +107,7 @@ export function QuadGridDialog({
             <div className="flex justify-center">
               <div className="relative w-40 aspect-video rounded overflow-hidden border border-zinc-700">
                 <img
-                  src={previewUrl}
+                  src={resolvedPreviewUrl || previewUrl || ''}
                   alt="锚点图"
                   className="w-full h-full object-cover"
                 />
@@ -164,14 +166,14 @@ export function QuadGridDialog({
 
           {/* 选项 */}
           <div className="flex items-center space-x-2 px-1">
-            <Checkbox 
-              id="use-char-ref" 
+            <Checkbox
+              id="use-char-ref"
               checked={useCharacterRef}
               onCheckedChange={(checked) => setUseCharacterRef(checked === true)}
               className="border-zinc-600 data-[state=checked]:bg-cyan-500 data-[state=checked]:border-cyan-500"
             />
-            <Label 
-              htmlFor="use-char-ref" 
+            <Label
+              htmlFor="use-char-ref"
               className="text-xs text-zinc-400 font-normal cursor-pointer select-none leading-none"
             >
               参考角色库形象（若画面人物混乱请关闭此项）

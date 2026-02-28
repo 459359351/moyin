@@ -43,7 +43,7 @@ function resolveVeoEndpointFamily(endpointTypes?: string[]): VeoEndpointFamily {
   if (
     normalized.some(t => t.includes('/v1/videos')) ||
     normalized.some(t => t.includes('sora')) ||
-    normalized.some(t => t.includes('openai') && t.includes('video'))
+    normalized.some(t => t.includes('openai') && (t.includes('video') || t.includes('视频')))
   ) {
     return 'openai_videos';
   }
@@ -51,7 +51,8 @@ function resolveVeoEndpointFamily(endpointTypes?: string[]): VeoEndpointFamily {
   if (
     normalized.some(t => t.includes('openai-response')) ||
     normalized.some(t => t.includes('/v1/video')) ||
-    normalized.some(t => t.includes('video/generations'))
+    normalized.some(t => t.includes('video/generations')) ||
+    normalized.some(t => t.includes('视频统一'))
   ) {
     return 'unified';
   }

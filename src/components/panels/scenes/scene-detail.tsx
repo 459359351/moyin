@@ -24,7 +24,17 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   MapPin,
   Edit3,
   Check,
@@ -48,7 +58,7 @@ interface SceneDetailProps {
 
 export function SceneDetail({ scene }: SceneDetailProps) {
   const { updateScene, deleteScene, selectScene } = useSceneStore();
-  
+
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState("");
   const [isEditingNotes, setIsEditingNotes] = useState(false);
@@ -58,7 +68,8 @@ export function SceneDetail({ scene }: SceneDetailProps) {
   const [isEditingVisualPrompt, setIsEditingVisualPrompt] = useState(false);
   const [editVisualPrompt, setEditVisualPrompt] = useState("");
   const [newTag, setNewTag] = useState("");
-  
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+
   const resolvedImage = useResolvedImageUrl(scene?.referenceImage);
 
   if (!scene) {
@@ -83,11 +94,14 @@ export function SceneDetail({ scene }: SceneDetailProps) {
   };
 
   const handleDelete = () => {
-    if (confirm(`确定要删除场景 "${scene.name}" 吗？`)) {
-      deleteScene(scene.id);
-      selectScene(null);
-      toast.success("场景已删除");
-    }
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    deleteScene(scene.id);
+    selectScene(null);
+    toast.success("场景已删除");
+    setDeleteDialogOpen(false);
   };
 
   const handleSaveNotes = () => {
@@ -130,8 +144,8 @@ export function SceneDetail({ scene }: SceneDetailProps) {
     if (!scene.referenceImage) return;
     try {
       let href = scene.referenceImage;
-      // local-image:// 需要先转为 base64 才能导出
-      if (href.startsWith('local-image://')) {
+      // local-image:// 或 idb-image:// 需要先转为 base64 才能导出
+      if (href.startsWith('local-image://') || href.startsWith('idb-image://')) {
         const base64 = await readImageAsBase64(href);
         if (!base64) {
           toast.error("无法读取本地图片");
@@ -197,7 +211,7 @@ export function SceneDetail({ scene }: SceneDetailProps) {
         <div className="p-3 space-y-4">
           {/* Main preview */}
           <div className="space-y-2">
-            <div 
+            <div
               className="aspect-video rounded-lg bg-muted overflow-hidden border relative"
               draggable={!!scene.referenceImage}
               onDragStart={(e) => {
@@ -212,9 +226,9 @@ export function SceneDetail({ scene }: SceneDetailProps) {
                 }
               }}
             >
-            {scene.referenceImage ? (
-                <img 
-                  src={resolvedImage || ''} 
+              {scene.referenceImage ? (
+                <img
+                  src={resolvedImage || ''}
                   alt={scene.name}
                   className="w-full h-full object-cover"
                 />
@@ -223,7 +237,7 @@ export function SceneDetail({ scene }: SceneDetailProps) {
                   <MapPin className="h-12 w-12 text-muted-foreground" />
                 </div>
               )}
-              
+
               {/* Drag hint */}
               {scene.referenceImage && (
                 <div className="absolute top-2 right-2 bg-black/50 text-white rounded p-1">
@@ -238,7 +252,7 @@ export function SceneDetail({ scene }: SceneDetailProps) {
           {/* Scene info */}
           <div className="space-y-3">
             <div className="text-xs font-medium text-muted-foreground">场景信息</div>
-            
+
             {/* Time and Atmosphere badges */}
             <div className="flex flex-wrap gap-1.5">
               <Badge variant="secondary" className="text-xs gap-1">
@@ -435,7 +449,7 @@ export function SceneDetail({ scene }: SceneDetailProps) {
                 导出概念图
               </Button>
             )}
-            
+
             {/* 如果是子场景，显示生成四视图按钮 */}
             {scene.isViewpointVariant && scene.referenceImage && (
               <Button
@@ -470,6 +484,27 @@ export function SceneDetail({ scene }: SceneDetailProps) {
           </div>
         </div>
       </ScrollArea>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除场景</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定要删除场景 "{scene.name}" 吗？此操作无法撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

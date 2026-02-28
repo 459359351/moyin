@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { useMediaStore } from "@/stores/media-store";
 import { useAppSettingsStore } from "@/stores/app-settings-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useResolvedImageUrl } from "@/hooks/use-resolved-image-url";
 import {
   Popover,
   PopoverContent,
@@ -28,6 +29,13 @@ interface MediaLibrarySelectorProps {
   disabled?: boolean;
 }
 
+/** Sub-component to resolve idb-image:// / local-image:// URLs for display */
+function ResolvedImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const resolved = useResolvedImageUrl(src);
+  if (!resolved) return <div className={cn("bg-muted flex items-center justify-center", className)}><ImageIcon className="h-4 w-4 text-muted-foreground/30" /></div>;
+  return <img src={resolved} alt={alt} className={className} />;
+}
+
 export function MediaLibrarySelector({
   sceneId: _sceneId,
   isEndFrame = false,
@@ -37,29 +45,29 @@ export function MediaLibrarySelector({
   void _sceneId; // Available for future use
   const [isOpen, setIsOpen] = useState(false);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
-  
+
   const { mediaFiles, folders } = useMediaStore();
   const { resourceSharing } = useAppSettingsStore();
   const { activeProjectId } = useProjectStore();
-  
+
   const visibleFolders = useMemo(() => {
     if (resourceSharing.shareMedia) return folders;
     if (!activeProjectId) return [];
     return folders.filter((f) => f.projectId === activeProjectId);
   }, [folders, resourceSharing.shareMedia, activeProjectId]);
-  
+
   const visibleMedia = useMemo(() => {
     if (resourceSharing.shareMedia) return mediaFiles;
     if (!activeProjectId) return [];
     return mediaFiles.filter((m) => m.projectId === activeProjectId);
   }, [mediaFiles, resourceSharing.shareMedia, activeProjectId]);
-  
+
   // 只获取图片类型的媒体文件（非临时）
-  const imageFiles = useMemo(() => 
+  const imageFiles = useMemo(() =>
     visibleMedia.filter(f => f.type === 'image' && !f.ephemeral),
     [visibleMedia]
   );
-  
+
   // 根据选中的文件夹筛选图片
   const filteredImages = useMemo(() => {
     if (selectedFolderId === null) {
@@ -67,13 +75,13 @@ export function MediaLibrarySelector({
     }
     return imageFiles.filter(f => f.folderId === selectedFolderId);
   }, [imageFiles, selectedFolderId]);
-  
+
   // 处理选择图片
   const handleSelectImage = (imageUrl: string) => {
     onSelect(imageUrl);
     setIsOpen(false);
   };
-  
+
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
@@ -99,7 +107,7 @@ export function MediaLibrarySelector({
             共 {filteredImages.length} 张图片
           </span>
         </div>
-        
+
         {imageFiles.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-8">
             素材库中没有图片，请先添加图片或生成四宫格
@@ -137,7 +145,7 @@ export function MediaLibrarySelector({
                 ))}
               </div>
             )}
-            
+
             {/* 图片网格 */}
             <div className="max-h-[300px] overflow-y-auto">
               {filteredImages.length === 0 ? (
@@ -149,14 +157,14 @@ export function MediaLibrarySelector({
                   {filteredImages.map((img) => {
                     const imageUrl = img.url || img.thumbnailUrl || '';
                     if (!imageUrl) return null;
-                    
+
                     return (
                       <button
                         key={img.id}
                         onClick={() => handleSelectImage(imageUrl)}
                         className="relative group aspect-video rounded overflow-hidden border-2 border-transparent hover:border-primary transition-colors"
                       >
-                        <img
+                        <ResolvedImage
                           src={imageUrl}
                           alt={img.name}
                           className="w-full h-full object-cover"
@@ -189,3 +197,4 @@ export function MediaLibrarySelector({
     </Popover>
   );
 }
+

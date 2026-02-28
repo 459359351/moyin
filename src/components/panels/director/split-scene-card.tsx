@@ -14,8 +14,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { 
-  type SplitScene, 
+import {
+  type SplitScene,
   type EmotionTag,
   type ShotSizeType,
   type DurationType,
@@ -34,10 +34,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Trash2, 
-  Edit3, 
-  Check, 
-  X, 
+  Trash2,
+  Edit3,
+  Check,
+  X,
   Play,
   ImageIcon,
   AlertCircle,
@@ -124,7 +124,7 @@ export interface SplitSceneCardProps {
 }
 
 export function SplitSceneCard({
-  scene, 
+  scene,
   onUpdateImagePrompt,
   onUpdateVideoPrompt,
   onUpdateEndFramePrompt,
@@ -212,7 +212,7 @@ export function SplitSceneCard({
   const handleFirstFrameUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
@@ -227,7 +227,7 @@ export function SplitSceneCard({
   const handleEndFrameUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
@@ -266,7 +266,7 @@ export function SplitSceneCard({
         const res = await fetch(imageUrl);
         blob = await res.blob();
       }
-      
+
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -295,7 +295,7 @@ export function SplitSceneCard({
   // Handle drag start for video
   const handleVideoDragStart = (e: React.DragEvent) => {
     if (!canDragVideo || !scene.videoUrl) return;
-    
+
     const dragData = {
       id: scene.videoMediaId || `scene-${scene.id}-video`,
       type: 'video',
@@ -304,10 +304,10 @@ export function SplitSceneCard({
       thumbnailUrl: scene.imageDataUrl,
       duration: 5,
     };
-    
+
     e.dataTransfer.setData('application/x-media-item', JSON.stringify(dragData));
     e.dataTransfer.effectAllowed = 'copy';
-    
+
     const dragImage = document.createElement('div');
     dragImage.className = 'bg-primary text-white px-2 py-1 rounded text-xs';
     dragImage.textContent = `分镜 ${scene.id + 1} 视频`;
@@ -436,7 +436,7 @@ export function SplitSceneCard({
                 </div>
               )}
             </div>
-            <div 
+            <div
               className={cn(
                 "aspect-video bg-muted rounded cursor-pointer relative group/image overflow-hidden border-2 transition-colors",
                 selectedFrameTarget === 'start'
@@ -447,8 +447,6 @@ export function SplitSceneCard({
                 setSelectedFrameTarget('start');
                 if (hasImage && resolvedImageUrl) {
                   setPreviewItem({ type: 'image', url: resolvedImageUrl, name: `分镜 ${scene.id + 1} 首帧` });
-                } else {
-                  firstFrameInputRef.current?.click();
                 }
               }}
             >
@@ -503,8 +501,8 @@ export function SplitSceneCard({
                 </>
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center gap-1">
-                  <Upload className="h-4 w-4 text-muted-foreground/50" />
-                  <span className="text-[10px] text-muted-foreground/50">上传</span>
+                  <ImageIcon className="h-4 w-4 text-muted-foreground/50" />
+                  <span className="text-[10px] text-muted-foreground/50">点击选择</span>
                 </div>
               )}
               {isImageGenerating && (
@@ -573,14 +571,14 @@ export function SplitSceneCard({
                     </button>
                   </>
                 )}
-              {/* 尾帧AI生成按钮：无论是“需要尾帧”还是“可选尾帧”都可以生成 */}
+                {/* 尾帧AI生成按钮：无论是“需要尾帧”还是“可选尾帧”都可以生成 */}
                 {!hasEndFrame && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onGenerateEndFrame?.(scene.id); }}
                     disabled={isGeneratingAny || scene.endFrameStatus === 'generating'}
                     className={cn(
                       "text-[9px] px-1.5 py-0.5 rounded disabled:opacity-50",
-                      scene.needsEndFrame 
+                      scene.needsEndFrame
                         ? "bg-orange-500/20 text-orange-500 hover:bg-orange-500/30"
                         : "bg-blue-500/20 text-blue-500 hover:bg-blue-500/30"
                     )}
@@ -594,21 +592,19 @@ export function SplitSceneCard({
                 )}
               </div>
             </div>
-            <div 
+            <div
               className={cn(
                 "aspect-video bg-muted rounded cursor-pointer relative group/endframe overflow-hidden border-2 transition-colors",
                 selectedFrameTarget === 'end'
                   ? "border-orange-500 border-solid"
-                  : scene.needsEndFrame 
-                    ? "border-dashed border-orange-500/30 hover:border-orange-500/50" 
+                  : scene.needsEndFrame
+                    ? "border-dashed border-orange-500/30 hover:border-orange-500/50"
                     : "border-dashed border-blue-400/30 hover:border-blue-400/50"
               )}
               onClick={() => {
                 setSelectedFrameTarget('end');
                 if (hasEndFrame && resolvedEndFrameUrl) {
                   setPreviewItem({ type: 'image', url: resolvedEndFrameUrl, name: `分镜 ${scene.id + 1} 尾帧` });
-                } else {
-                  endFrameInputRef.current?.click();
                 }
               }}
             >
@@ -680,8 +676,8 @@ export function SplitSceneCard({
                 </div>
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center gap-1 bg-blue-500/5">
-                  <Upload className="h-4 w-4 text-blue-400/60" />
-                  <span className="text-[10px] text-blue-400/60">上传/生成</span>
+                  <ImageIcon className="h-4 w-4 text-blue-400/60" />
+                  <span className="text-[10px] text-blue-400/60">点击选择</span>
                 </div>
               )}
             </div>
@@ -702,7 +698,7 @@ export function SplitSceneCard({
                 selectedViewpointId={scene.viewpointId}
                 selectedSubViewId={scene.subViewId}
                 isEndFrame={false}
-                onChange={(sceneLibId, viewpointId, refImage, subViewId) => 
+                onChange={(sceneLibId, viewpointId, refImage, subViewId) =>
                   onUpdateSceneReference(scene.id, sceneLibId, viewpointId, refImage, subViewId)
                 }
                 disabled={isGeneratingAny}
@@ -721,7 +717,7 @@ export function SplitSceneCard({
                   selectedViewpointId={scene.endFrameViewpointId}
                   selectedSubViewId={scene.endFrameSubViewId}
                   isEndFrame={true}
-                  onChange={(sceneLibId, viewpointId, refImage, subViewId) => 
+                  onChange={(sceneLibId, viewpointId, refImage, subViewId) =>
                     onUpdateEndFrameSceneReference(scene.id, sceneLibId, viewpointId, refImage, subViewId)
                   }
                   disabled={isGeneratingAny}
@@ -730,18 +726,37 @@ export function SplitSceneCard({
             )}
             {/* 素材库选择器 - 根据选中的帧目标应用 */}
             {onUploadImage && (
-              <MediaLibrarySelector
-                sceneId={scene.id}
-                isEndFrame={selectedFrameTarget === 'end'}
-                onSelect={(imageUrl) => {
-                  if (selectedFrameTarget === 'start') {
-                    onUploadImage(scene.id, imageUrl);
-                  } else {
-                    onUpdateEndFrame(scene.id, imageUrl);
-                  }
-                }}
-                disabled={isGeneratingAny}
-              />
+              <>
+                <button
+                  onClick={() => {
+                    if (selectedFrameTarget === 'start') {
+                      firstFrameInputRef.current?.click();
+                    } else {
+                      endFrameInputRef.current?.click();
+                    }
+                  }}
+                  disabled={isGeneratingAny}
+                  className={cn(
+                    "flex items-center gap-1 px-2 py-1 rounded border border-dashed text-xs transition-colors disabled:opacity-50",
+                    "border-green-500/30 text-green-400 hover:border-green-500/50 hover:text-green-300 hover:bg-green-500/5"
+                  )}
+                >
+                  <Upload className="h-3 w-3" />
+                  <span className="max-w-[80px] truncate">上传文件</span>
+                </button>
+                <MediaLibrarySelector
+                  sceneId={scene.id}
+                  isEndFrame={selectedFrameTarget === 'end'}
+                  onSelect={(imageUrl) => {
+                    if (selectedFrameTarget === 'start') {
+                      onUploadImage(scene.id, imageUrl);
+                    } else {
+                      onUpdateEndFrame(scene.id, imageUrl);
+                    }
+                  }}
+                  disabled={isGeneratingAny}
+                />
+              </>
             )}
           </div>
         </div>
@@ -805,10 +820,10 @@ export function SplitSceneCard({
               )}
             </div>
           )}
-          
+
           {isVideoReady && scene.videoUrl && (
             <div className="flex items-center gap-1">
-              <div 
+              <div
                 className="flex-1 aspect-video max-w-[120px] bg-muted rounded overflow-hidden cursor-pointer relative"
                 onClick={() => setPreviewItem({ type: 'video', url: scene.videoUrl!, name: `分镜 ${scene.id + 1} 视频` })}
                 draggable={!!canDragVideo}
@@ -852,12 +867,12 @@ export function SplitSceneCard({
           {isVideoFailed && (
             <span className={cn(
               "text-xs flex items-center gap-1",
-              isVideoModerationSkipped 
-                ? "text-amber-500" 
+              isVideoModerationSkipped
+                ? "text-amber-500"
                 : "text-destructive"
             )}>
               <AlertCircle className="h-3 w-3" />
-              {isVideoModerationSkipped 
+              {isVideoModerationSkipped
                 ? '内容审核跳过'
                 : (scene.videoError || '生成失败')}
             </span>
@@ -957,7 +972,7 @@ export function SplitSceneCard({
                     </div>
                   </>
                 ) : (
-                  <div 
+                  <div
                     className="flex items-start gap-2 cursor-pointer p-1.5 rounded bg-blue-500/5 hover:bg-blue-500/10 transition-colors border border-blue-500/10"
                     onClick={() => !isGeneratingAny && startEditing('image')}
                   >
@@ -994,11 +1009,11 @@ export function SplitSceneCard({
                     </div>
                   </>
                 ) : (
-                  <div 
+                  <div
                     className={cn(
                       "flex items-start gap-2 cursor-pointer p-1.5 rounded transition-colors border",
-                      scene.needsEndFrame 
-                        ? "bg-orange-500/10 hover:bg-orange-500/20 border-orange-500/20" 
+                      scene.needsEndFrame
+                        ? "bg-orange-500/10 hover:bg-orange-500/20 border-orange-500/20"
                         : "bg-orange-500/5 hover:bg-orange-500/10 border-orange-500/10"
                     )}
                     onClick={() => !isGeneratingAny && startEditing('endFrame')}
@@ -1040,7 +1055,7 @@ export function SplitSceneCard({
                     </div>
                   </>
                 ) : (
-                  <div 
+                  <div
                     className="flex items-start gap-2 cursor-pointer p-1.5 rounded bg-green-500/5 hover:bg-green-500/10 transition-colors border border-green-500/10"
                     onClick={() => !isGeneratingAny && startEditing('video')}
                   >
@@ -1054,7 +1069,7 @@ export function SplitSceneCard({
             </div>
           ) : (
             /* 折叠摘要视图：彩色图标标签 + 内容预览 */
-            <div 
+            <div
               className="space-y-1 p-2 rounded-md bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors border border-transparent hover:border-muted"
               onClick={() => setShowPromptDetails(true)}
             >
@@ -1084,7 +1099,7 @@ export function SplitSceneCard({
                 </span>
                 <span className="text-muted-foreground">
                   {scene.videoPromptZh || scene.videoPrompt || '未设置'}
-                {scene.cameraMovement && scene.cameraMovement !== 'none' && (
+                  {scene.cameraMovement && scene.cameraMovement !== 'none' && (
                     <span className="ml-1 text-green-500/50">[{CAMERA_MOVEMENT_PRESETS.find(p => p.id === scene.cameraMovement)?.label || scene.cameraMovement}]</span>
                   )}
                   {scene.specialTechnique && scene.specialTechnique !== 'none' && (
