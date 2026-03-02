@@ -101,12 +101,24 @@ export function ShotGroupCard({
   const [gridPreviewOpen, setGridPreviewOpen] = useState(false);
 
   /** 下载格子图 */
-  const handleDownloadGrid = useCallback(() => {
+  const handleDownloadGrid = useCallback(async () => {
     if (!group.gridImageUrl) return;
-    const a = document.createElement('a');
-    a.href = group.gridImageUrl;
-    a.download = `${group.name}_grid.png`;
-    a.click();
+    try {
+      const res = await fetch(group.gridImageUrl);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `${group.name}_grid.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+      toast.success(`${group.name}_grid.png 下载完成`);
+    } catch (err) {
+      console.error('[ShotGroup] Grid download failed:', err);
+      toast.error('格子图下载失败');
+    }
   }, [group.gridImageUrl, group.name]);
 
   /** 复制 prompt */

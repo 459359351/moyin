@@ -81,7 +81,9 @@ export function AngleSwitchResultDialog({
       const a = document.createElement("a");
       a.href = url;
       a.download = filename;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (error) {
       console.error("Download failed:", error);
@@ -137,8 +139,8 @@ export function AngleSwitchResultDialog({
                     key={item.timestamp}
                     onClick={() => onSelectHistory?.(index)}
                     className={`shrink-0 w-32 aspect-video rounded overflow-hidden border-2 transition-all ${selectedHistoryIndex === index
-                        ? "border-primary ring-2 ring-primary ring-offset-1"
-                        : "border-border hover:border-primary/50"
+                      ? "border-primary ring-2 ring-primary ring-offset-1"
+                      : "border-border hover:border-primary/50"
                       }`}
                   >
                     <img

@@ -50,10 +50,10 @@ export const SYSTEM_CATEGORIES: Array<{
   name: string;
   icon: string; // lucide icon name for UI reference
 }> = [
-  { category: 'ai-image', name: 'AI图片', icon: 'Sparkles' },
-  { category: 'ai-video', name: 'AI视频', icon: 'Film' },
-  { category: 'upload',   name: '上传文件', icon: 'CloudUpload' },
-];
+    { category: 'ai-image', name: 'AI图片', icon: 'Sparkles' },
+    { category: 'ai-video', name: 'AI视频', icon: 'Film' },
+    { category: 'upload', name: '上传文件', icon: 'CloudUpload' },
+  ];
 
 interface MediaStore {
   mediaFiles: MediaFile[];
@@ -70,17 +70,17 @@ interface MediaStore {
   loadProjectMedia: (projectId: string) => Promise<void>;
   clearProjectMedia: (projectId: string) => Promise<void>;
   clearAllMedia: () => void;
-  
+
   // Folder management
   addFolder: (name: string, parentId?: string | null, projectId?: string) => string;
   renameFolder: (id: string, name: string) => void;
   deleteFolder: (id: string) => void;
   setCurrentFolder: (id: string | null) => void;
-  
+
   // File management
   renameMediaFile: (id: string, name: string) => void;
   moveToFolder: (mediaId: string, folderId: string | null) => void;
-  
+
   // AI generated content
   addMediaFromUrl: (options: {
     url: string;
@@ -92,13 +92,13 @@ interface MediaStore {
     folderId?: string | null;
     projectId?: string;
   }) => string;
-  
+
   // Get or create system category folder (replaces getOrCreateAIFolder)
   getOrCreateCategoryFolder: (category: MediaFolderCategory) => string;
-  
+
   // Initialize system folders (called on startup)
   initSystemFolders: () => void;
-  
+
   // Project scoping helpers
   assignProjectToUnscoped: (projectId: string) => void;
 }
@@ -226,407 +226,407 @@ export const useMediaStore = create<MediaStore>()(
       currentFolderId: null,
       isLoading: false,
 
-  addMediaFile: async (projectId, file) => {
-    const newItem: MediaFile = {
-      ...file,
-      id: generateUUID(),
-      projectId,
-    };
-
-    // Add to local state immediately for UI responsiveness
-    set((state) => ({
-      mediaFiles: [...state.mediaFiles, newItem],
-    }));
-
-    // Save to persistent storage in background (OPFS)
-    try {
-      if (newItem.file) {
-        await storageService.saveMediaFile({ projectId, mediaItem: newItem });
-      }
-    } catch (error) {
-      console.error("Failed to save media item to OPFS:", error);
-    }
-
-    // Also save to Electron local storage for persistent URL
-    // blob: URLs can't be passed to IPC, so we convert File → data: URL → local file
-    if (isElectron() && newItem.file && (newItem.type === 'image' || newItem.type === 'video')) {
-      (async () => {
-        try {
-          // Convert File to data: URL (IPC handler supports data: but not blob:)
-          const dataUrl = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(newItem.file!);
-          });
-          
-          const category: ImageCategory = newItem.type === 'video' ? 'videos' : 'shots';
-          const ext = newItem.type === 'video' ? '.mp4' : '.png';
-          const filename = `upload_${newItem.name.replace(/[^a-zA-Z0-9.]/g, '_')}_${Date.now()}${ext}`;
-          const localPath = await saveImageToLocal(dataUrl, category, filename);
-          
-          if (localPath !== dataUrl && localPath.startsWith('local-image://')) {
-            set((state) => ({
-              mediaFiles: state.mediaFiles.map((f) =>
-                f.id === newItem.id ? { ...f, url: localPath } : f
-              ),
-            }));
-            console.log('[MediaStore] Upload saved locally:', localPath);
-          }
-          
-          // Save video thumbnail locally too
-          if (newItem.type === 'video' && newItem.thumbnailUrl && newItem.thumbnailUrl.startsWith('data:')) {
-            const thumbFilename = `upload_thumb_${Date.now()}.png`;
-            const thumbLocalPath = await saveImageToLocal(newItem.thumbnailUrl, category, thumbFilename);
-            if (thumbLocalPath !== newItem.thumbnailUrl && thumbLocalPath.startsWith('local-image://')) {
-              set((state) => ({
-                mediaFiles: state.mediaFiles.map((f) =>
-                  f.id === newItem.id ? { ...f, thumbnailUrl: thumbLocalPath } : f
-                ),
-              }));
-            }
-          }
-        } catch (error) {
-          console.warn('[MediaStore] Failed to save upload locally:', error);
-        }
-      })();
-    }
-
-    return newItem;
-  },
-
-  removeMediaFile: async (projectId: string, id: string) => {
-    const state = get();
-    const item = state.mediaFiles.find((media) => media.id === id);
-
-    // Cleanup object URLs to prevent memory leaks
-    if (item?.url) {
-      URL.revokeObjectURL(item.url);
-      if (item.thumbnailUrl) {
-        URL.revokeObjectURL(item.thumbnailUrl);
-      }
-    }
-
-    // Remove from local state immediately
-    set((state) => ({
-      mediaFiles: state.mediaFiles.filter((media) => media.id !== id),
-    }));
-
-    // Remove from persistent storage
-    try {
-      await storageService.deleteMediaFile({ projectId, id });
-    } catch (error) {
-      console.error("Failed to delete media item:", error);
-    }
-  },
-
-  loadProjectMedia: async (projectId) => {
-    set({ isLoading: true });
-
-    try {
-      const mediaItems = await storageService.loadAllMediaFiles({ projectId });
-
-      // Regenerate thumbnails for video items
-      const updatedMediaItems = await Promise.all(
-        mediaItems.map(async (item) => {
-          if (item.type === "video" && item.file) {
-            try {
-              const { thumbnailUrl, width, height } =
-                await generateVideoThumbnail(item.file);
-              return {
-                ...item,
-                thumbnailUrl,
-                width: width || item.width,
-                height: height || item.height,
-              };
-            } catch (error) {
-              console.error(
-                `Failed to regenerate thumbnail for video ${item.id}:`,
-                error
-              );
-              return item;
-            }
-          }
-          return item;
-        })
-      );
-
-      const scopedMediaItems = updatedMediaItems.map((item) => ({
-        ...item,
-        projectId,
-      }));
-
-      set({ mediaFiles: scopedMediaItems });
-    } catch (error) {
-      console.error("Failed to load media items:", error);
-    } finally {
-      set({ isLoading: false });
-    }
-  },
-
-  clearProjectMedia: async (projectId) => {
-    const state = get();
-
-    // Cleanup all object URLs
-    state.mediaFiles.forEach((item) => {
-      if (item.url) {
-        URL.revokeObjectURL(item.url);
-      }
-      if (item.thumbnailUrl) {
-        URL.revokeObjectURL(item.thumbnailUrl);
-      }
-    });
-
-    // Clear local state
-    set({ mediaFiles: [] });
-
-    // Clear persistent storage
-    try {
-      const mediaIds = state.mediaFiles.map((item) => item.id);
-      await Promise.all(
-        mediaIds.map((id) => storageService.deleteMediaFile({ projectId, id }))
-      );
-    } catch (error) {
-      console.error("Failed to clear media items from storage:", error);
-    }
-  },
-
-  clearAllMedia: () => {
-    const state = get();
-
-    // Cleanup all object URLs
-    state.mediaFiles.forEach((item) => {
-      if (item.url) {
-        URL.revokeObjectURL(item.url);
-      }
-      if (item.thumbnailUrl) {
-        URL.revokeObjectURL(item.thumbnailUrl);
-      }
-    });
-
-    // Clear local state
-    set({ mediaFiles: [], folders: [], currentFolderId: null });
-  },
-
-  // Folder management
-  addFolder: (name, parentId = null, projectId) => {
-    const id = generateUUID();
-    const newFolder: MediaFolder = {
-      id,
-      name,
-      parentId: parentId ?? null,
-      projectId,
-      isAutoCreated: !!projectId,
-      createdAt: Date.now(),
-    };
-    set((state) => ({
-      folders: [...state.folders, newFolder],
-    }));
-    return id;
-  },
-
-  renameFolder: (id, name) => {
-    set((state) => ({
-      folders: state.folders.map((f) =>
-        f.id === id ? { ...f, name } : f
-      ),
-    }));
-  },
-
-  deleteFolder: (id) => {
-    const { folders, mediaFiles } = get();
-    // Prevent deleting system folders
-    const target = folders.find((f) => f.id === id);
-    if (target?.isSystem) return;
-    // Get all descendant folder IDs
-    const getDescendantIds = (folderId: string): string[] => {
-      const children = folders.filter((f) => f.parentId === folderId);
-      return [folderId, ...children.flatMap((c) => getDescendantIds(c.id))];
-    };
-    const folderIdsToDelete = getDescendantIds(id);
-    
-    // Move files in deleted folders to root
-    const updatedFiles = mediaFiles.map((f) =>
-      folderIdsToDelete.includes(f.folderId || '') ? { ...f, folderId: null } : f
-    );
-    
-    set({
-      folders: folders.filter((f) => !folderIdsToDelete.includes(f.id)),
-      mediaFiles: updatedFiles,
-      currentFolderId: folderIdsToDelete.includes(get().currentFolderId || '') ? null : get().currentFolderId,
-    });
-  },
-
-  setCurrentFolder: (id) => {
-    set({ currentFolderId: id });
-  },
-
-  // File management
-  renameMediaFile: (id, name) => {
-    set((state) => ({
-      mediaFiles: state.mediaFiles.map((f) =>
-        f.id === id ? { ...f, name } : f
-      ),
-    }));
-  },
-
-  moveToFolder: (mediaId, folderId) => {
-    set((state) => ({
-      mediaFiles: state.mediaFiles.map((f) =>
-        f.id === mediaId ? { ...f, folderId } : f
-      ),
-    }));
-  },
-
-  // AI generated content - add from URL without File object
-  addMediaFromUrl: ({ url, name, type, source, thumbnailUrl, duration, folderId, projectId }) => {
-    const id = generateUUID();
-    const newItem: MediaFile = {
-      id,
-      name,
-      type,
-      url,
-      thumbnailUrl,
-      duration,
-      source,
-      folderId: folderId ?? null,
-      projectId,
-      file: null as any, // No file object for URL-based media
-    };
-    
-    // Add to state immediately (with URL)
-    set((state) => ({
-      mediaFiles: [...state.mediaFiles, newItem],
-    }));
-    
-    // For images and videos, save to local file system in Electron
-    // Handles http, https, and data: URLs
-    if ((type === 'image' || type === 'video') && url && (url.startsWith('http') || url.startsWith('data:'))) {
-      (async () => {
-        try {
-          const category: ImageCategory = type === 'video' ? 'videos' : 'shots';
-          const ext = type === 'video' ? '.mp4' : '.png';
-          const filename = `${name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}${ext}`;
-          const localPath = await saveImageToLocal(url, category, filename);
-          
-          // Only update if we got a local path (not the original URL back)
-          if (localPath !== url && localPath.startsWith('local-image://')) {
-            set((state) => ({
-              mediaFiles: state.mediaFiles.map((f) =>
-                f.id === id ? { ...f, url: localPath } : f
-              ),
-            }));
-            console.log(`[MediaStore] Saved ${type} locally:`, localPath);
-          }
-          
-          // Also save thumbnailUrl if it's a data: URL
-          if (thumbnailUrl && thumbnailUrl.startsWith('data:')) {
-            const thumbFilename = `thumb_${name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.png`;
-            const thumbLocalPath = await saveImageToLocal(thumbnailUrl, category, thumbFilename);
-            if (thumbLocalPath !== thumbnailUrl && thumbLocalPath.startsWith('local-image://')) {
-              set((state) => ({
-                mediaFiles: state.mediaFiles.map((f) =>
-                  f.id === id ? { ...f, thumbnailUrl: thumbLocalPath } : f
-                ),
-              }));
-              console.log(`[MediaStore] Saved thumbnail locally:`, thumbLocalPath);
-            }
-          }
-        } catch (error) {
-          console.warn('[MediaStore] Background save failed:', error);
-        }
-      })();
-    }
-    
-    return id;
-  },
-
-  // Get or create a system category folder
-  getOrCreateCategoryFolder: (category) => {
-    const { folders } = get();
-    const existing = folders.find((f) => f.isSystem && f.category === category);
-    if (existing) return existing.id;
-    
-    // Create new system folder
-    const catDef = SYSTEM_CATEGORIES.find((c) => c.category === category);
-    const name = catDef?.name || category;
-    const id = generateUUID();
-    const newFolder: MediaFolder = {
-      id,
-      name,
-      parentId: null,
-      isSystem: true,
-      category,
-      createdAt: Date.now(),
-    };
-    set((state) => ({
-      folders: [...state.folders, newFolder],
-    }));
-    return id;
-  },
-  
-  // Initialize system folders on startup
-  initSystemFolders: () => {
-    const { folders } = get();
-    const newFolders: MediaFolder[] = [];
-    
-    for (const cat of SYSTEM_CATEGORIES) {
-      const exists = folders.find((f) => f.isSystem && f.category === cat.category);
-      if (!exists) {
-        newFolders.push({
+      addMediaFile: async (projectId, file) => {
+        const newItem: MediaFile = {
+          ...file,
           id: generateUUID(),
-          name: cat.name,
-          parentId: null,
-          isSystem: true,
-          category: cat.category,
-          createdAt: Date.now(),
+          projectId,
+        };
+
+        // Add to local state immediately for UI responsiveness
+        set((state) => ({
+          mediaFiles: [...state.mediaFiles, newItem],
+        }));
+
+        // Save to persistent storage in background (OPFS)
+        try {
+          if (newItem.file) {
+            await storageService.saveMediaFile({ projectId, mediaItem: newItem });
+          }
+        } catch (error) {
+          console.error("Failed to save media item to OPFS:", error);
+        }
+
+        // Save to local/IDB storage for persistent URL
+        // blob: URLs can't be passed to IPC, so we convert File → data: URL → local file
+        if (newItem.file && (newItem.type === 'image' || newItem.type === 'video')) {
+          (async () => {
+            try {
+              // Convert File to data: URL (IPC handler supports data: but not blob:)
+              const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(newItem.file!);
+              });
+
+              const category: ImageCategory = newItem.type === 'video' ? 'videos' : 'shots';
+              const ext = newItem.type === 'video' ? '.mp4' : '.png';
+              const filename = `upload_${newItem.name.replace(/[^a-zA-Z0-9.]/g, '_')}_${Date.now()}${ext}`;
+              const localPath = await saveImageToLocal(dataUrl, category, filename);
+
+              if (localPath !== dataUrl && (localPath.startsWith('local-image://') || localPath.startsWith('idb-image://'))) {
+                set((state) => ({
+                  mediaFiles: state.mediaFiles.map((f) =>
+                    f.id === newItem.id ? { ...f, url: localPath } : f
+                  ),
+                }));
+                console.log('[MediaStore] Upload saved locally:', localPath);
+              }
+
+              // Save video thumbnail locally too
+              if (newItem.type === 'video' && newItem.thumbnailUrl && newItem.thumbnailUrl.startsWith('data:')) {
+                const thumbFilename = `upload_thumb_${Date.now()}.png`;
+                const thumbLocalPath = await saveImageToLocal(newItem.thumbnailUrl, category, thumbFilename);
+                if (thumbLocalPath !== newItem.thumbnailUrl && (thumbLocalPath.startsWith('local-image://') || thumbLocalPath.startsWith('idb-image://'))) {
+                  set((state) => ({
+                    mediaFiles: state.mediaFiles.map((f) =>
+                      f.id === newItem.id ? { ...f, thumbnailUrl: thumbLocalPath } : f
+                    ),
+                  }));
+                }
+              }
+            } catch (error) {
+              console.warn('[MediaStore] Failed to save upload locally:', error);
+            }
+          })();
+        }
+
+        return newItem;
+      },
+
+      removeMediaFile: async (projectId: string, id: string) => {
+        const state = get();
+        const item = state.mediaFiles.find((media) => media.id === id);
+
+        // Cleanup object URLs to prevent memory leaks
+        if (item?.url) {
+          URL.revokeObjectURL(item.url);
+          if (item.thumbnailUrl) {
+            URL.revokeObjectURL(item.thumbnailUrl);
+          }
+        }
+
+        // Remove from local state immediately
+        set((state) => ({
+          mediaFiles: state.mediaFiles.filter((media) => media.id !== id),
+        }));
+
+        // Remove from persistent storage
+        try {
+          await storageService.deleteMediaFile({ projectId, id });
+        } catch (error) {
+          console.error("Failed to delete media item:", error);
+        }
+      },
+
+      loadProjectMedia: async (projectId) => {
+        set({ isLoading: true });
+
+        try {
+          const mediaItems = await storageService.loadAllMediaFiles({ projectId });
+
+          // Regenerate thumbnails for video items
+          const updatedMediaItems = await Promise.all(
+            mediaItems.map(async (item) => {
+              if (item.type === "video" && item.file) {
+                try {
+                  const { thumbnailUrl, width, height } =
+                    await generateVideoThumbnail(item.file);
+                  return {
+                    ...item,
+                    thumbnailUrl,
+                    width: width || item.width,
+                    height: height || item.height,
+                  };
+                } catch (error) {
+                  console.error(
+                    `Failed to regenerate thumbnail for video ${item.id}:`,
+                    error
+                  );
+                  return item;
+                }
+              }
+              return item;
+            })
+          );
+
+          const scopedMediaItems = updatedMediaItems.map((item) => ({
+            ...item,
+            projectId,
+          }));
+
+          set({ mediaFiles: scopedMediaItems });
+        } catch (error) {
+          console.error("Failed to load media items:", error);
+        } finally {
+          set({ isLoading: false });
+        }
+      },
+
+      clearProjectMedia: async (projectId) => {
+        const state = get();
+
+        // Cleanup all object URLs
+        state.mediaFiles.forEach((item) => {
+          if (item.url) {
+            URL.revokeObjectURL(item.url);
+          }
+          if (item.thumbnailUrl) {
+            URL.revokeObjectURL(item.thumbnailUrl);
+          }
         });
-      }
-    }
-    
-    // Migrate legacy "AI生成" folder → mark as system ai-image folder
-    const legacyAiFolder = folders.find((f) => f.name === 'AI生成' && !f.isSystem && f.parentId === null);
-    if (legacyAiFolder) {
-      const hasAiImageFolder = folders.find((f) => f.isSystem && f.category === 'ai-image')
-        || newFolders.find((f) => f.category === 'ai-image');
-      if (!hasAiImageFolder) {
-        // Convert legacy folder to system folder
+
+        // Clear local state
+        set({ mediaFiles: [] });
+
+        // Clear persistent storage
+        try {
+          const mediaIds = state.mediaFiles.map((item) => item.id);
+          await Promise.all(
+            mediaIds.map((id) => storageService.deleteMediaFile({ projectId, id }))
+          );
+        } catch (error) {
+          console.error("Failed to clear media items from storage:", error);
+        }
+      },
+
+      clearAllMedia: () => {
+        const state = get();
+
+        // Cleanup all object URLs
+        state.mediaFiles.forEach((item) => {
+          if (item.url) {
+            URL.revokeObjectURL(item.url);
+          }
+          if (item.thumbnailUrl) {
+            URL.revokeObjectURL(item.thumbnailUrl);
+          }
+        });
+
+        // Clear local state
+        set({ mediaFiles: [], folders: [], currentFolderId: null });
+      },
+
+      // Folder management
+      addFolder: (name, parentId = null, projectId) => {
+        const id = generateUUID();
+        const newFolder: MediaFolder = {
+          id,
+          name,
+          parentId: parentId ?? null,
+          projectId,
+          isAutoCreated: !!projectId,
+          createdAt: Date.now(),
+        };
+        set((state) => ({
+          folders: [...state.folders, newFolder],
+        }));
+        return id;
+      },
+
+      renameFolder: (id, name) => {
         set((state) => ({
           folders: state.folders.map((f) =>
-            f.id === legacyAiFolder.id
-              ? { ...f, name: 'AI图片', isSystem: true, category: 'ai-image' as const, projectId: undefined }
-              : f
+            f.id === id ? { ...f, name } : f
           ),
         }));
-        // Remove ai-image from newFolders if we just migrated
-        const idx = newFolders.findIndex((f) => f.category === 'ai-image');
-        if (idx >= 0) newFolders.splice(idx, 1);
-      }
-    }
-    
-    // Also migrate legacy timestamp folders ("项目-MM-DD HH:MM") to remove orphans
-    // Files in these folders will be moved to ai-image folder later via user action
-    
-    if (newFolders.length > 0) {
-      set((state) => ({
-        folders: [...state.folders, ...newFolders],
-      }));
-      console.log('[MediaStore] Initialized system folders:', newFolders.map((f) => f.name).join(', '));
-    }
-  },
-  
-  // Assign missing projectId to current project (for isolation toggle)
-  // System folders are excluded — they belong globally
-  assignProjectToUnscoped: (projectId) => {
-    set((state) => ({
-      mediaFiles: state.mediaFiles.map((media) =>
-        media.projectId ? media : { ...media, projectId }
-      ),
-      folders: state.folders.map((folder) =>
-        folder.projectId || folder.isSystem ? folder : { ...folder, projectId }
-      ),
-    }));
-  },
+      },
+
+      deleteFolder: (id) => {
+        const { folders, mediaFiles } = get();
+        // Prevent deleting system folders
+        const target = folders.find((f) => f.id === id);
+        if (target?.isSystem) return;
+        // Get all descendant folder IDs
+        const getDescendantIds = (folderId: string): string[] => {
+          const children = folders.filter((f) => f.parentId === folderId);
+          return [folderId, ...children.flatMap((c) => getDescendantIds(c.id))];
+        };
+        const folderIdsToDelete = getDescendantIds(id);
+
+        // Move files in deleted folders to root
+        const updatedFiles = mediaFiles.map((f) =>
+          folderIdsToDelete.includes(f.folderId || '') ? { ...f, folderId: null } : f
+        );
+
+        set({
+          folders: folders.filter((f) => !folderIdsToDelete.includes(f.id)),
+          mediaFiles: updatedFiles,
+          currentFolderId: folderIdsToDelete.includes(get().currentFolderId || '') ? null : get().currentFolderId,
+        });
+      },
+
+      setCurrentFolder: (id) => {
+        set({ currentFolderId: id });
+      },
+
+      // File management
+      renameMediaFile: (id, name) => {
+        set((state) => ({
+          mediaFiles: state.mediaFiles.map((f) =>
+            f.id === id ? { ...f, name } : f
+          ),
+        }));
+      },
+
+      moveToFolder: (mediaId, folderId) => {
+        set((state) => ({
+          mediaFiles: state.mediaFiles.map((f) =>
+            f.id === mediaId ? { ...f, folderId } : f
+          ),
+        }));
+      },
+
+      // AI generated content - add from URL without File object
+      addMediaFromUrl: ({ url, name, type, source, thumbnailUrl, duration, folderId, projectId }) => {
+        const id = generateUUID();
+        const newItem: MediaFile = {
+          id,
+          name,
+          type,
+          url,
+          thumbnailUrl,
+          duration,
+          source,
+          folderId: folderId ?? null,
+          projectId,
+          file: null as any, // No file object for URL-based media
+        };
+
+        // Add to state immediately (with URL)
+        set((state) => ({
+          mediaFiles: [...state.mediaFiles, newItem],
+        }));
+
+        // For images and videos, save to local file system in Electron
+        // Handles http, https, and data: URLs
+        if ((type === 'image' || type === 'video') && url && (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:'))) {
+          (async () => {
+            try {
+              const category: ImageCategory = type === 'video' ? 'videos' : 'shots';
+              const ext = type === 'video' ? '.mp4' : '.png';
+              const filename = `${name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}${ext}`;
+              const localPath = await saveImageToLocal(url, category, filename);
+
+              // Only update if we got a persistent path (not the original URL back)
+              if (localPath !== url && (localPath.startsWith('local-image://') || localPath.startsWith('idb-image://'))) {
+                set((state) => ({
+                  mediaFiles: state.mediaFiles.map((f) =>
+                    f.id === id ? { ...f, url: localPath } : f
+                  ),
+                }));
+                console.log(`[MediaStore] Saved ${type} locally:`, localPath);
+              }
+
+              // Also save thumbnailUrl if it's a data: URL
+              if (thumbnailUrl && thumbnailUrl.startsWith('data:')) {
+                const thumbFilename = `thumb_${name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.png`;
+                const thumbLocalPath = await saveImageToLocal(thumbnailUrl, category, thumbFilename);
+                if (thumbLocalPath !== thumbnailUrl && (thumbLocalPath.startsWith('local-image://') || thumbLocalPath.startsWith('idb-image://'))) {
+                  set((state) => ({
+                    mediaFiles: state.mediaFiles.map((f) =>
+                      f.id === id ? { ...f, thumbnailUrl: thumbLocalPath } : f
+                    ),
+                  }));
+                  console.log(`[MediaStore] Saved thumbnail locally:`, thumbLocalPath);
+                }
+              }
+            } catch (error) {
+              console.warn('[MediaStore] Background save failed:', error);
+            }
+          })();
+        }
+
+        return id;
+      },
+
+      // Get or create a system category folder
+      getOrCreateCategoryFolder: (category) => {
+        const { folders } = get();
+        const existing = folders.find((f) => f.isSystem && f.category === category);
+        if (existing) return existing.id;
+
+        // Create new system folder
+        const catDef = SYSTEM_CATEGORIES.find((c) => c.category === category);
+        const name = catDef?.name || category;
+        const id = generateUUID();
+        const newFolder: MediaFolder = {
+          id,
+          name,
+          parentId: null,
+          isSystem: true,
+          category,
+          createdAt: Date.now(),
+        };
+        set((state) => ({
+          folders: [...state.folders, newFolder],
+        }));
+        return id;
+      },
+
+      // Initialize system folders on startup
+      initSystemFolders: () => {
+        const { folders } = get();
+        const newFolders: MediaFolder[] = [];
+
+        for (const cat of SYSTEM_CATEGORIES) {
+          const exists = folders.find((f) => f.isSystem && f.category === cat.category);
+          if (!exists) {
+            newFolders.push({
+              id: generateUUID(),
+              name: cat.name,
+              parentId: null,
+              isSystem: true,
+              category: cat.category,
+              createdAt: Date.now(),
+            });
+          }
+        }
+
+        // Migrate legacy "AI生成" folder → mark as system ai-image folder
+        const legacyAiFolder = folders.find((f) => f.name === 'AI生成' && !f.isSystem && f.parentId === null);
+        if (legacyAiFolder) {
+          const hasAiImageFolder = folders.find((f) => f.isSystem && f.category === 'ai-image')
+            || newFolders.find((f) => f.category === 'ai-image');
+          if (!hasAiImageFolder) {
+            // Convert legacy folder to system folder
+            set((state) => ({
+              folders: state.folders.map((f) =>
+                f.id === legacyAiFolder.id
+                  ? { ...f, name: 'AI图片', isSystem: true, category: 'ai-image' as const, projectId: undefined }
+                  : f
+              ),
+            }));
+            // Remove ai-image from newFolders if we just migrated
+            const idx = newFolders.findIndex((f) => f.category === 'ai-image');
+            if (idx >= 0) newFolders.splice(idx, 1);
+          }
+        }
+
+        // Also migrate legacy timestamp folders ("项目-MM-DD HH:MM") to remove orphans
+        // Files in these folders will be moved to ai-image folder later via user action
+
+        if (newFolders.length > 0) {
+          set((state) => ({
+            folders: [...state.folders, ...newFolders],
+          }));
+          console.log('[MediaStore] Initialized system folders:', newFolders.map((f) => f.name).join(', '));
+        }
+      },
+
+      // Assign missing projectId to current project (for isolation toggle)
+      // System folders are excluded — they belong globally
+      assignProjectToUnscoped: (projectId) => {
+        set((state) => ({
+          mediaFiles: state.mediaFiles.map((media) =>
+            media.projectId ? media : { ...media, projectId }
+          ),
+          folders: state.folders.map((folder) =>
+            folder.projectId || folder.isSystem ? folder : { ...folder, projectId }
+          ),
+        }));
+      },
     }),
     {
       name: 'moyin-media-store',
@@ -648,10 +648,10 @@ export const useMediaStore = create<MediaStore>()(
             };
             const normalizedUrl = normalizeUrl(f.url);
             const normalizedThumbnail = normalizeUrl(f.thumbnailUrl);
-            
+
             // Strip non-persistent URLs: blob: (session-only) and data: (too large)
             const isTransientUrl = (u?: string) => !u || u.startsWith('blob:') || u.startsWith('data:');
-            
+
             return {
               ...f,
               file: undefined, // Don't persist File objects
@@ -688,10 +688,10 @@ async function migrateMediaDataUrls(state: MediaStore) {
   const filesToMigrate = state.mediaFiles.filter(
     (f) => (f.url && f.url.startsWith('data:')) || (f.thumbnailUrl && f.thumbnailUrl.startsWith('data:'))
   );
-  
+
   if (filesToMigrate.length === 0) return;
   console.log(`[MediaStore] Migrating ${filesToMigrate.length} media files with data: URLs...`);
-  
+
   for (const file of filesToMigrate) {
     try {
       // Migrate main URL
@@ -708,7 +708,7 @@ async function migrateMediaDataUrls(state: MediaStore) {
           }));
         }
       }
-      
+
       // Migrate thumbnail URL
       if (file.thumbnailUrl && file.thumbnailUrl.startsWith('data:')) {
         const category: ImageCategory = file.type === 'video' ? 'videos' : 'shots';
@@ -726,6 +726,6 @@ async function migrateMediaDataUrls(state: MediaStore) {
       console.warn(`[MediaStore] Failed to migrate media ${file.id}:`, error);
     }
   }
-  
+
   console.log('[MediaStore] Migration complete.');
 }

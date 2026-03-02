@@ -49,7 +49,7 @@ import type { Project } from "@/stores/project-store";
 export function Dashboard() {
   const { projects, createProject, deleteProject, renameProject } = useProjectStore();
   const { setActiveTab } = useMediaPanelStore();
-  
+
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
 
@@ -258,12 +258,12 @@ export function Dashboard() {
   const formatDate = (timestamp: number) => {
     const now = Date.now();
     const diff = now - timestamp;
-    
+
     if (diff < 60000) return "刚刚";
     if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
     if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
     if (diff < 604800000) return `${Math.floor(diff / 86400000)} 天前`;
-    
+
     return new Date(timestamp).toLocaleDateString("zh-CN", {
       year: "numeric",
       month: "short",
@@ -274,9 +274,9 @@ export function Dashboard() {
   const allSelected = projects.length > 0 && selectedIds.size === projects.length;
 
   return (
-    <div className="flex flex-col h-full bg-background overflow-hidden">
+    <div className="flex flex-col h-full bg-background overflow-hidden relative">
       {/* Header */}
-      <div className="h-16 border-b border-border bg-panel px-8 flex items-center justify-between shrink-0">
+      <div className="h-16 border-b border-white/5 dark:border-white/5 glass-panel z-10 sticky top-0 px-8 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-primary text-primary-foreground flex items-center justify-center">
             <Aperture className="w-6 h-6" />
@@ -286,7 +286,7 @@ export function Dashboard() {
             <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Mopian Creator Studio</p>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-2">
           {projects.length > 0 && (
             <Button
@@ -300,7 +300,7 @@ export function Dashboard() {
           )}
           <Button
             onClick={() => setShowNewProject(true)}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 font-medium"
+            className="animated-gradient text-primary-foreground hover:brightness-110 shadow-lg shadow-primary/20 font-medium transition-all"
           >
             <Plus className="w-4 h-4 mr-2" />
             新建项目
@@ -381,7 +381,7 @@ export function Dashboard() {
                 <div
                   key={project.id}
                   className={cn(
-                    "group relative bg-card border rounded-xl overflow-hidden transition-all duration-200",
+                    "group relative bg-card border rounded-xl overflow-hidden hover-lift",
                     selectionMode
                       ? isSelected
                         ? "border-primary ring-1 ring-primary/30 cursor-pointer"
@@ -409,8 +409,9 @@ export function Dashboard() {
                   )}
 
                   {/* Project Thumbnail */}
-                  <div className="aspect-video bg-muted flex items-center justify-center">
-                    <Film className="w-12 h-12 text-muted-foreground/30" />
+                  <div className="aspect-video bg-gradient-to-br from-muted to-muted/50 dark:from-muted/20 dark:to-background flex items-center justify-center relative overflow-hidden">
+                    <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay"></div>
+                    <Film className="w-12 h-12 text-muted-foreground/30 relative z-10" />
                     {isDuplicating && (
                       <div className="absolute inset-0 bg-background/60 flex items-center justify-center">
                         <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />

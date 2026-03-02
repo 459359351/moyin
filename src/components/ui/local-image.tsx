@@ -22,11 +22,16 @@ interface LocalImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
 export function LocalImage({ src, fallback, className, alt, ...props }: LocalImageProps) {
   const [error, setError] = useState(false);
   const [resolvedSrc, setResolvedSrc] = useState<string | null>(
-    src.startsWith('idb-image://') ? null : src
+    !src || src.startsWith('idb-image://') ? null : src
   );
 
   // Resolve idb-image:// URLs to object URLs
   useEffect(() => {
+    if (!src) {
+      setResolvedSrc(null);
+      setError(true);
+      return;
+    }
     if (!src.startsWith('idb-image://')) {
       setResolvedSrc(src);
       setError(false);

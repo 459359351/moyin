@@ -29,6 +29,7 @@ import { useRef, useState, useMemo, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LocalImage } from "@/components/ui/local-image";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -145,7 +146,7 @@ function MediaItemWithContextMenu({
   onGenerateScenes?: (item: MediaFile) => void;
 }) {
   const isImage = item.type === 'image';
-  
+
   return (
     <ContextMenu>
       <ContextMenuTrigger>{children}</ContextMenuTrigger>
@@ -205,11 +206,11 @@ function MediaItemWithContextMenu({
 }
 
 export function MediaView() {
-  const { 
-    mediaFiles, 
+  const {
+    mediaFiles,
     folders,
     currentFolderId,
-    addMediaFile, 
+    addMediaFile,
     removeMediaFile,
     addFolder,
     renameFolder,
@@ -229,7 +230,7 @@ export function MediaView() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [sortBy, setSortBy] = useState<"name" | "type" | "duration" | "size">("name");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
-  
+
   // Dialog states
   const [newFolderDialogOpen, setNewFolderDialogOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
@@ -327,7 +328,7 @@ export function MediaView() {
           const result = await (window as any).electronAPI.saveFileDialog({
             localPath: item.url,
             defaultPath: item.name,
-            filters: item.type === 'video' 
+            filters: item.type === 'video'
               ? [{ name: 'Video', extensions: ['mp4', 'webm', 'mov'] }]
               : [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'gif'] }],
           });
@@ -340,11 +341,11 @@ export function MediaView() {
           }
           return;
         }
-        
+
         toast.error('请重启应用以启用导出功能');
         return;
       }
-      
+
       // For http/https/data URLs, use standard download
       const a = document.createElement("a");
       a.href = item.url;
@@ -362,16 +363,16 @@ export function MediaView() {
   // AI 导演功能 - 智能切割（直接进入切割状态）
   const handleSmartSplit = (item: MediaFile) => {
     if (item.type !== 'image' || !item.url) return;
-    
+
     // 设置项目文件夹（如果图片在文件夹中）
     if (item.folderId) {
       setProjectFolderId(item.folderId);
     }
-    
+
     // 设置故事板图片并进入预览状态（等待用户点击切割）
     setStoryboardImage(item.url, item.id);
     setStoryboardStatus('preview');
-    
+
     // 切换到导演面板
     setActiveTab('director');
     toast.success('已载入图片，请点击“切割场景”开始智能切割');
@@ -380,24 +381,24 @@ export function MediaView() {
   // AI 导演功能 - 分镜生成（直接进入编辑状态，作为单张分镜）
   const handleGenerateScenes = (item: MediaFile) => {
     if (item.type !== 'image' || !item.url) return;
-    
+
     // 设置项目文件夹
     if (item.folderId) {
       setProjectFolderId(item.folderId);
     }
-    
+
     // 设置故事板图片为当前图片
     setStoryboardImage(item.url, item.id);
-    
+
     // 直接设置为编辑状态，并创建单个分镜
     const { setSplitScenes, setStoryboardConfig } = useDirectorStore.getState();
-    
+
     // 设置配置为单场景
     setStoryboardConfig({
       sceneCount: 1,
       storyPrompt: item.name,
     });
-    
+
     // 创建单个分镜（包含所有必需属性）
     setSplitScenes([{
       id: 0,
@@ -450,9 +451,9 @@ export function MediaView() {
       col: 0,
       sourceRect: { x: 0, y: 0, width: item.width || 1920, height: item.height || 1080 },
     }]);
-    
+
     setStoryboardStatus('editing');
-    
+
     // 切换到导演面板
     setActiveTab('director');
     toast.success('已创建分镜，可以开始生成视频');
@@ -522,7 +523,7 @@ export function MediaView() {
 
   const filteredMediaItems = useMemo(() => {
     // Filter by current folder
-    let filtered = visibleMediaFiles.filter((item) => 
+    let filtered = visibleMediaFiles.filter((item) =>
       !item.ephemeral && (item.folderId || null) === currentFolderId
     );
 
@@ -610,8 +611,8 @@ export function MediaView() {
     if (item.type === "image") {
       return (
         <div className="w-full h-full flex items-center justify-center">
-          <img
-            src={item.url}
+          <LocalImage
+            src={item.url || ''}
             alt={item.name}
             className="w-full max-h-full object-cover"
             loading="lazy"
@@ -622,8 +623,8 @@ export function MediaView() {
       if (item.thumbnailUrl) {
         return (
           <div className="relative w-full h-full">
-            <img
-              src={item.thumbnailUrl}
+            <LocalImage
+              src={item.thumbnailUrl || ''}
               alt={item.name}
               className="w-full h-full object-cover rounded"
               loading="lazy"

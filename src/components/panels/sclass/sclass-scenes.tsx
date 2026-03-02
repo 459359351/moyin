@@ -353,7 +353,7 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
   ];
 
   const handleAspectRatioChange = useCallback((ratio: SClassAspectRatio) => {
-    setStoryboardConfig({ aspectRatio: ratio });
+    setStoryboardConfig({ aspectRatio: ratio as '16:9' | '9:16' });
     toast.success(`画幅比已切换为 ${ratio}`);
   }, [setStoryboardConfig]);
 

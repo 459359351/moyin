@@ -4,10 +4,14 @@
 import { useEffect, useRef } from "react";
 import { usePreviewStore } from "@/stores/preview-store";
 import { Video } from "lucide-react";
+import { useResolvedImageUrl } from "@/hooks/use-resolved-image-url";
 
 export function PreviewPanel() {
   const { previewItem, shouldAutoPlay, setVideoRef, playNext, playlist } = usePreviewStore();
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Resolve idb-image:// URLs for preview
+  const resolvedUrl = useResolvedImageUrl(previewItem?.url);
 
   // Register video ref with store
   useEffect(() => {
@@ -22,7 +26,7 @@ export function PreviewPanel() {
     if (shouldAutoPlay && videoRef.current && previewItem?.type === "video") {
       videoRef.current.play().catch(console.error);
     }
-  }, [shouldAutoPlay, previewItem]);
+  }, [shouldAutoPlay, previewItem, resolvedUrl]);
 
   // Handle video ended - play next in playlist
   useEffect(() => {
@@ -53,14 +57,14 @@ export function PreviewPanel() {
       <div className="flex-1 flex items-center justify-center overflow-hidden">
         {previewItem.type === "image" ? (
           <img
-            src={previewItem.url}
+            src={resolvedUrl || ""}
             alt={previewItem.name || "Preview"}
             className="max-w-full max-h-full object-contain"
           />
         ) : (
           <video
             ref={videoRef}
-            src={previewItem.url}
+            src={resolvedUrl || ""}
             controls
             className="max-w-full max-h-full"
           >

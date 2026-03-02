@@ -113,7 +113,12 @@ export async function convertToHttpUrl(rawUrl: unknown): Promise<string> {
   }
 
   let base64 = url;
-  if (url.startsWith('local-image://') || url.startsWith('idb-image://')) {
+  if (url.startsWith('idb-image://')) {
+    const { readImageAsBase64 } = await import('@/lib/image-storage');
+    const resolved = await readImageAsBase64(url);
+    if (!resolved) throw new Error('Failed to read image from IndexedDB');
+    base64 = resolved;
+  } else if (url.startsWith('local-image://')) {
     base64 = await normalizeUrl(url);
   }
 
@@ -327,11 +332,14 @@ function getVideoTaskErrorMessage(data: any, fallback: string = 'Video generatio
     data?.error,
     data?.message,
     data?.error_message,
+    data?.failure_reason,
     data?.detail?.error?.message,
     data?.detail?.error,
     data?.detail?.message,
     data?.detail?.error_message,
+    data?.detail?.failure_reason,
     data?.detail?.video_generation_error,
+    data?.detail?.pending_info?.failure_reason,
   ];
 
   for (const item of candidates) {
@@ -413,6 +421,22 @@ function toRunwayRatio(aspectRatio: string): string {
   return map[aspectRatio] || '1280:720';
 }
 
+/**
+ * Normalize internal model names to 361API's unified format.
+ * Internal format uses underscores (OpenAI convention): veo_3_1-fast
+ * 361API expects dots (Google convention): veo3.1-fast
+ * 
+ * Conversion: veo_X_Y-suffix → veoX.Y-suffix
+ */
+function normalizeVeoModelForApi(model: string): string {
+  // veo_3_1-fast → veo3.1-fast, veo_3_1 → veo3.1, veo_3_1-4K → veo3.1-4k
+  const normalized = model.replace(/^veo_(\d+)_(\d+)/i, 'veo$1.$2');
+  if (normalized !== model) {
+    console.log(`[VideoGen] Model name normalized: ${model} → ${normalized}`);
+  }
+  return normalized;
+}
+
 async function callUnifiedVideoApi(
   apiKey: string,
   prompt: string,
@@ -426,11 +450,12 @@ async function callUnifiedVideoApi(
   keyManager?: { handleError: (status: number) => boolean },
 ): Promise<string> {
   const isVeo = isVeoModel(model);
+  const apiModel = isVeo ? normalizeVeoModelForApi(model) : model;
   const firstFrame = imageWithRoles.find((img) => img.role === 'first_frame') || imageWithRoles[0];
   const lastFrame = imageWithRoles.find((img) => img.role === 'last_frame');
 
   const body: Record<string, unknown> = {
-    model,
+    model: apiModel,
     prompt,
   };
 
@@ -442,7 +467,12 @@ async function callUnifiedVideoApi(
     const images: string[] = [];
     if (firstFrame?.url) images.push(firstFrame.url);
     if (lastFrame?.url) images.push(lastFrame.url);
-    if (images.length > 0) body.images = images;
+    if (images.length > 0) {
+      body.images = images;
+      console.log(`[VideoGen] Sending ${images.length} image(s): first_frame=${!!firstFrame?.url}, last_frame=${!!lastFrame?.url}`);
+    } else {
+      console.log(`[VideoGen] No first/last frame images — text-to-video mode`);
+    }
   } else {
     const metadata: Record<string, unknown> = {};
     if (duration) metadata.duration = duration;
@@ -475,6 +505,8 @@ async function callUnifiedVideoApi(
   let submitData: any = null;
   let submitError: Error | null = null;
   let successfulSubmitUrl = '';
+
+  console.log(`[VideoGen] Submit body:`, JSON.stringify(body, null, 2));
 
   for (const submitUrl of submitUrls) {
     const resp = await fetch(submitUrl, {
@@ -601,6 +633,7 @@ async function callUnifiedVideoApi(
     }
 
     if (status === 'failed' || status === 'error' || status === 'cancelled') {
+      console.error(`[VideoGen] Task failed. Full response:`, JSON.stringify(statusData, null, 2));
       throw new Error(getVideoTaskErrorMessage(statusData));
     }
   }

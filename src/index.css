@@ -118,10 +118,10 @@
 .dark {
   /* ===== Dark Mode - 剪映风格 ===== */
   /* Base surfaces - 4层灰度体系 */
-  --background: 0 0% 7%;          /* #121212 - 最深背景 */
+  --background: 0 0% 5%;          /* #0d0d0d - 更深的背景，提供更好的对比度和现代感 */
   --foreground: 0 0% 93%;         /* #ededed - 主文字 */
-  --panel: 0 0% 11%;              /* #1c1c1c - 面板背景 */
-  --panel-elevated: 0 0% 14%;     /* #242424 - 悬浮面板 */
+  --panel: 0 0% 9%;               /* #171717 - 面板背景，比底色稍浅 */
+  --panel-elevated: 0 0% 12%;     /* #1f1f1f - 悬浮面板 */
   
   /* Card */
   --card: 0 0% 13%;               /* #212121 */
@@ -178,6 +178,9 @@
 @layer base {
   * {
     @apply border-border;
+    transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 200ms;
   }
   body {
     @apply bg-background text-foreground;
@@ -235,11 +238,42 @@
   box-shadow: 0 0 20px hsl(var(--accent) / 0.3);
 }
 
-/* Glass effect */
+/* Glass effect - Premium */
 .glass {
-  background: hsl(var(--panel) / 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: hsl(var(--panel) / 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid hsl(var(--border) / 0.4);
+}
+
+.glass-panel {
+  background: hsl(var(--panel) / 0.6);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid hsl(var(--foreground) / 0.08);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+/* Interaction Effects */
+.hover-lift {
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px -8px hsl(var(--foreground) / 0.15);
+}
+
+/* Premium Gradients */
+.animated-gradient {
+  background: linear-gradient(135deg, hsl(var(--brand-start)), hsl(var(--brand-end)), hsl(var(--primary)));
+  background-size: 200% 200%;
+  animation: gradient-shift 6s ease infinite;
+}
+
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
 
 /* Fix: Force panel size constraints to prevent layout collapse in Electron.

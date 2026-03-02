@@ -153,10 +153,17 @@ export function SceneDetail({ scene }: SceneDetailProps) {
         }
         href = base64;
       }
+      const res = await fetch(href);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = href;
+      link.href = blobUrl;
       link.download = `${scene.name}-concept.png`;
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+      toast.success(`${scene.name}-concept.png 导出成功`);
     } catch (error) {
       console.error('Export failed:', error);
       toast.error("导出失败");

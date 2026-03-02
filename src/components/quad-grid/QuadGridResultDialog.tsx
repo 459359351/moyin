@@ -76,7 +76,9 @@ export function QuadGridResultDialog({
       const a = document.createElement("a");
       a.href = url;
       a.download = `quad-grid-${result.variationType}-${index + 1}-${Date.now()}.png`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (error) {
       console.error("Download failed:", error);
@@ -94,7 +96,7 @@ export function QuadGridResultDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl p-4 bg-zinc-900 border-zinc-800">
+      <DialogContent className="max-w-2xl p-6 glass-panel border-white/10 rounded-2xl shadow-2xl animate-in fade-in zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out data-[state=closed]:zoom-out-95">
         <DialogHeader className="pb-2">
           <DialogTitle className="text-sm text-white flex items-center gap-2">
             <Grid2X2 className="h-4 w-4 text-cyan-400" />
@@ -131,10 +133,10 @@ export function QuadGridResultDialog({
                     key={index}
                     onClick={() => setSelectedIndex(index)}
                     className={cn(
-                      "aspect-video rounded overflow-hidden border-2 transition-all relative group",
+                      "aspect-video rounded overflow-hidden border-2 transition-all duration-300 relative group hover-lift",
                       selectedIndex === index
-                        ? "border-cyan-500 ring-2 ring-cyan-500/30"
-                        : "border-zinc-700 hover:border-zinc-600"
+                        ? "border-cyan-500 ring-2 ring-cyan-500/30 shadow-[0_0_15px_rgba(6,182,212,0.3)]"
+                        : "border-white/10 hover:border-white/30"
                     )}
                   >
                     <img
@@ -157,10 +159,10 @@ export function QuadGridResultDialog({
                           e.stopPropagation();
                           handleDownload(img, index);
                         }}
-                        className="p-1 rounded bg-black/60 text-white hover:bg-blue-600"
+                        className="p-1.5 rounded-md bg-black/60 backdrop-blur-md text-white hover:bg-primary transition-colors"
                         title="下载"
                       >
-                        <Download className="h-3 w-3" />
+                        <Download className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </button>
@@ -215,7 +217,7 @@ export function QuadGridResultDialog({
             variant="outline"
             size="sm"
             onClick={() => onOpenChange(false)}
-            className="h-8 text-xs border-zinc-700"
+            className="h-8 text-xs glass border-white/10 hover:bg-white/5"
           >
             <X className="h-3 w-3 mr-1" />
             关闭
@@ -223,7 +225,7 @@ export function QuadGridResultDialog({
           <Button
             size="sm"
             onClick={() => onApply(selectedIndex)}
-            className="h-8 text-xs bg-cyan-500 hover:bg-cyan-600 text-black"
+            className="h-8 text-xs animated-gradient text-white hover:brightness-110 shadow-lg shadow-cyan-500/20"
           >
             <Check className="h-3 w-3 mr-1" />
             应用到{frameType === "start" ? "首帧" : "尾帧"}
