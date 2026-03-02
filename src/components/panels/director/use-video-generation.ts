@@ -159,7 +159,7 @@ export async function buildImageWithRoles(
   return imageWithRoles;
 }
 
-type VideoApiFormat = 'openai_official' | 'unified' | 'volc' | 'wan' | 'kling' | 'replicate';
+type VideoApiFormat = 'openai_official' | 'unified' | 'volc' | 'wan' | 'kling' | 'replicate' | 'grok' | 'sora';
 
 const VIDEO_FORMAT_MAP: Record<string, VideoApiFormat> = {
   'openai-response': 'unified',
@@ -174,7 +174,8 @@ function inferVideoApiFormatFromEndpointType(endpointTypeRaw: string): VideoApiF
   const direct = VIDEO_FORMAT_MAP[endpointType];
   if (direct) return direct;
 
-  if (endpointType.includes('sora') || endpointType.includes('/v1/videos')) return 'openai_official';
+  if (endpointType.includes('sora')) return 'sora';
+  if (endpointType.includes('/v1/videos')) return 'openai_official';
   if (endpointType.includes('openai') && (endpointType.includes('video') || endpointType.includes('视频'))) return 'openai_official';
   if (endpointType.includes('kling') || endpointType.includes('omni-video')) return 'kling';
 
@@ -201,12 +202,15 @@ function inferVideoApiFormatFromEndpointType(endpointTypeRaw: string): VideoApiF
   if (
     endpointType.includes('video/generations') ||
     endpointType.includes('/v1/video') ||
-    endpointType.includes('grok') ||
     endpointType.includes('luma') ||
     endpointType.includes('runway') ||
     endpointType.includes('vidu')
   ) {
     return 'unified';
+  }
+
+  if (endpointType.includes('grok')) {
+    return 'grok';
   }
 
   return null;
@@ -223,6 +227,29 @@ function detectVideoApiFormat(model: string): VideoApiFormat {
   if (isVeoModel(model)) {
     console.log(`[VideoGen] Veo model detected: ${model} -> unified format (POST /v1/video/create)`);
     return 'unified';
+  }
+
+  // Sora-2 models: always use 361API's sora format (JSON to /v1/video/create)
+  // Must take priority over metadata because endpoint type 'openAI官方视频格式' would
+  // incorrectly match openai_official (FormData to /v1/videos), which 361API doesn't support for sora
+  if (m.includes('sora-2') || m.includes('sora-all')) {
+    console.log(`[VideoGen] Sora-2 model detected: ${model} -> sora format (POST /v1/video/create)`);
+    return 'sora';
+  }
+
+  // Grok video models: always use 361API's grok format (JSON to /v1/video/create)
+  // Must take priority over metadata because endpoint types could match 'unified' which
+  // sends wrong field names (image string vs images array)
+  if (m.includes('grok-video') || m.includes('grok-3-video')) {
+    console.log(`[VideoGen] Grok model detected: ${model} -> grok format (POST /v1/video/create)`);
+    return 'grok';
+  }
+
+  // Wan models: always use wan format (POST /alibailian/api/v1/services/aigc/video-generation/video-synthesis)
+  // Must take priority to ensure img_url is correctly passed for image-to-video
+  if (m.includes('wan')) {
+    console.log(`[VideoGen] Wan model detected: ${model} -> wan format`);
+    return 'wan';
   }
 
   const endpointTypes = useAPIConfigStore.getState().modelEndpointTypes[model];
@@ -242,7 +269,9 @@ function detectVideoApiFormat(model: string): VideoApiFormat {
     console.warn(`[VideoGen] Unknown endpoint types for ${model}:`, endpointTypes, 'fallback to name-based');
   }
 
-  if (m.includes('sora-2') || m.includes('openai')) return 'openai_official';
+  if (m.includes('grok-video') || m.includes('grok-3-video')) return 'grok';
+  if (m.includes('sora-2') || m.includes('sora-all')) return 'sora';
+  if (m.includes('openai')) return 'openai_official';
   if (m.includes('kling')) return 'kling';
   if (m.includes('seedance') || m.includes('doubao')) return 'volc';
   if (m.includes('wan')) return 'wan';
@@ -585,7 +614,7 @@ async function callUnifiedVideoApi(
   // /v1/video/generations → poll via /v1/video/generations/{id}
   const usedCreateEndpoint = successfulSubmitUrl.includes('video/create');
   const pollUrl = usedCreateEndpoint
-    ? buildEndpoint(baseUrl, `video/query?id=${encodeURIComponent(taskId)}`)
+    ? buildEndpoint(baseUrl, `video/query?id=${taskId}`)
     : buildEndpoint(baseUrl, `video/generations/${taskId}`);
   console.log(`[VideoGen] Poll URL: ${pollUrl} (submit was ${usedCreateEndpoint ? 'video/create' : 'video/generations'})`);
 
@@ -694,6 +723,10 @@ export async function callVideoGenerationApi(
       return callKlingVideoApi(apiKey, prompt, videoBaseUrl, model, aspectRatio, processedImages, duration, onProgress, keyManager);
     case 'replicate':
       return callReplicateVideoApi(apiKey, prompt, videoBaseUrl, model, aspectRatio, processedImages, duration, videoResolution, onProgress, keyManager);
+    case 'grok':
+      return callJuxinVideoGenerationApi(apiKey, prompt, aspectRatio, processedImages, onProgress, keyManager, videoBaseUrl, model);
+    case 'sora':
+      return callSoraVideoApi(apiKey, prompt, videoBaseUrl, model, aspectRatio, processedImages, duration, videoResolution, onProgress, keyManager);
     default:
       return callUnifiedVideoApi(apiKey, prompt, videoBaseUrl, model, aspectRatio, processedImages, videoResolution, duration, onProgress, keyManager);
   }
@@ -885,7 +918,7 @@ async function callWanVideoApi(
   console.log('[VideoGen] Wan format 闂?POST /ali/bailian/api/v1/services/aigc/video-generation/video-synthesis', { model });
 
   const submitResponse = await fetch(
-    `${rootBase}/ali/bailian/api/v1/services/aigc/video-generation/video-synthesis`,
+    `${rootBase}/alibailian/api/v1/services/aigc/video-generation/video-synthesis`,
     {
       method: 'POST',
       headers: {
@@ -1466,6 +1499,178 @@ export async function extractLastFrameFromVideo(
     video.src = resolvedUrl;
     video.load();
   });
+}
+
+// ==================== Sora-2 (361API unified format) Video Generation ====================
+
+/**
+ * Convert aspect ratio to Sora orientation (portrait/landscape)
+ */
+function toSora361Orientation(aspectRatio?: string): string {
+  return (aspectRatio === '9:16' || aspectRatio === '3:4') ? 'portrait' : 'landscape';
+}
+
+/**
+ * Convert resolution to Sora size (small=720p, large=1080p)
+ */
+function toSora361Size(videoResolution?: string): string {
+  return (videoResolution || '').toLowerCase().includes('1080') ? 'large' : 'small';
+}
+
+/**
+ * Call Sora-2 video generation API via 361API unified format
+ * Submit: POST /v1/video/create (JSON)
+ * Poll:   GET  /v1/video/query?id={taskId}
+ */
+async function callSoraVideoApi(
+  apiKey: string,
+  prompt: string,
+  baseUrl: string,
+  model: string,
+  aspectRatio: string,
+  imageWithRoles: Array<{ url: string; role: string }>,
+  duration?: number,
+  videoResolution?: string,
+  onProgress?: (progress: number) => void,
+  keyManager?: { handleError: (status: number) => boolean },
+): Promise<string> {
+  const images: string[] = [];
+  const firstFrame = imageWithRoles.find(img => img.role === 'first_frame') || imageWithRoles[0];
+  if (firstFrame?.url) images.push(firstFrame.url);
+
+  // Sora-2 only supports duration 10 or 15
+  const soraDuration = (duration && duration >= 12) ? 15 : 10;
+
+  const requestBody = {
+    model,
+    prompt,
+    images,
+    orientation: toSora361Orientation(aspectRatio),
+    size: toSora361Size(videoResolution),
+    duration: soraDuration,
+    watermark: false,
+  };
+
+  // Check if images are base64 data URLs (which would make the request body huge)
+  const imgSizes = images.map(url => url.startsWith('data:') ? `base64(${(url.length / 1024).toFixed(0)}KB)` : `url(${url.substring(0, 80)}...)`);
+  console.log('[VideoGen] Sora (361API) format -> POST /v1/video/create', {
+    model,
+    orientation: requestBody.orientation,
+    size: requestBody.size,
+    duration: requestBody.duration,
+    imageInfo: imgSizes,
+  });
+
+  onProgress?.(5); // Show early progress during submit
+
+  // Sora submit may take several minutes (361API processes synchronously)
+  // Show progress ticks during wait and abort after 10 minutes
+  const SORA_SUBMIT_TIMEOUT_MS = 10 * 60 * 1000;
+  const abortController = new AbortController();
+  const submitTimer = setTimeout(() => abortController.abort(), SORA_SUBMIT_TIMEOUT_MS);
+
+  // Tick progress from 5% to 18% during submit wait (every 10s)
+  let submitProgress = 5;
+  const progressTimer = setInterval(() => {
+    submitProgress = Math.min(submitProgress + 1, 18);
+    onProgress?.(submitProgress);
+  }, 10_000);
+
+  let submitResponse: Response;
+  try {
+    submitResponse = await fetch(buildEndpoint(baseUrl, 'video/create'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(requestBody),
+      signal: abortController.signal,
+    });
+  } catch (err: any) {
+    clearTimeout(submitTimer);
+    clearInterval(progressTimer);
+    if (err.name === 'AbortError') {
+      throw new Error('Sora 视频提交超时（等待超过10分钟），请稍后重试');
+    }
+    throw err;
+  } finally {
+    clearTimeout(submitTimer);
+    clearInterval(progressTimer);
+  }
+
+  onProgress?.(20);
+
+  if (!submitResponse.ok) {
+    const errorText = await submitResponse.text();
+    console.error('[VideoGen] Sora video submit error:', submitResponse.status, errorText);
+    handleVideoSubmitError(submitResponse.status, errorText, keyManager);
+  }
+
+  const submitData = await submitResponse.json();
+  console.log('[VideoGen] Sora submit response:', submitData);
+
+  const directUrl = extractVideoUrl(submitData);
+  if (directUrl) return directUrl;
+
+  const taskId = (submitData.id || submitData.task_id)?.toString();
+  if (!taskId) throw new Error('Sora video task id is missing from submit response.');
+
+  // Don't use encodeURIComponent — task IDs like "sora-2:task_xxx" have colons
+  // that 361API expects as-is in the query parameter
+  const pollUrl = buildEndpoint(baseUrl, `video/query?id=${taskId}`);
+  console.log(`[VideoGen] Sora poll URL: ${pollUrl}`);
+
+  for (let attempt = 0; attempt < VIDEO_POLL_MAX_ATTEMPTS; attempt++) {
+    onProgress?.(Math.min(20 + Math.floor((attempt / VIDEO_POLL_MAX_ATTEMPTS) * 80), 99));
+    await sleep(VIDEO_POLL_INTERVAL_MS);
+
+    const statusResponse = await fetch(pollUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!statusResponse.ok) {
+      console.warn(`[VideoGen] Sora poll attempt ${attempt + 1} failed: HTTP ${statusResponse.status}`);
+      if (statusResponse.status === 404) throw new Error('Sora video task not found.');
+      continue;
+    }
+
+    const statusData = await statusResponse.json();
+    const status = getVideoTaskStatus(statusData);
+    console.log(`[VideoGen] Sora poll attempt ${attempt + 1}: status="${status}"`, statusData);
+
+    if (status === 'completed' || status === 'succeeded' || status === 'success') {
+      let videoUrl = extractVideoUrl(statusData);
+      if (!videoUrl) {
+        videoUrl = await refetchVideoUrlAfterCompletion(async () => {
+          const followResp = await fetch(pollUrl, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${apiKey}`,
+            },
+          });
+          if (!followResp.ok) return null;
+          return followResp.json();
+        });
+      }
+      if (videoUrl) return videoUrl;
+      continue;
+    }
+
+    if (status === 'failed' || status === 'error' || status === 'cancelled') {
+      throw new Error(getVideoTaskErrorMessage(statusData, 'Sora video generation failed.'));
+    }
+  }
+
+  throw new Error('Sora video generation timed out.');
 }
 
 // ==================== 闂傚倸鍊搁崐宄懊归崶銊х彾闁割偆鍠嗘禒鍫㈢磼鐎ｎ厽纭堕柡鍡楁閺岀喖姊荤€靛壊妲紓浣哄Х婵炩偓闁诡喗顨呴埥澶婎潨閸℃ɑ娅孖 Grok Video Generation ====================

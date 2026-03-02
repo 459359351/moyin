@@ -44,6 +44,8 @@ interface ProviderOption {
   platform: string;
   name: string;
   model: string;
+  /** 模型是否在 provider 的已同步模型列表中（API Key 是否支持该模型） */
+  available: boolean;
 }
 
 interface FeatureMeta {
@@ -105,6 +107,67 @@ const FEATURE_CONFIGS: FeatureMeta[] = [
   },
 ];
 
+// ==================== 功能级别模型白名单 ====================
+
+/**
+ * 功能级别模型白名单
+ * 只有在此列表中的模型才会出现在对应功能的服务映射选择器中
+ * 白名单模型始终显示，但只有当 API Key 实际支持时才可勾选
+ *
+ * 如果某个功能没有配置白名单（undefined），则保持全量展示行为
+ */
+const FEATURE_ALLOWED_MODELS: Partial<Record<AIFeature, string[]>> = {
+  // 剧本分析 / 对话
+  script_analysis: [
+    'claude-haiku-4-5-20251001',
+    'deepseek-v3.2',
+    'gemini-3-pro-preview',
+    'glm-5',
+    'gpt-5.2',
+  ],
+  // 图片生成（角色 + 场景共用）
+  character_generation: [
+    'gemini-3-pro-image-preview',
+    'gpt-image-1.5',
+  ],
+  // 视频生成
+  video_generation: [
+    'doubao-seedance-1-5-pro-251215',
+    'grok-video-3-10s',
+    'sora-2-all',
+    'veo3.1',
+    'veo3.1-fast',
+    'veo3.1-4k',
+    'wan2.6-i2v',
+  ],
+  // 图片理解
+  image_understanding: [
+    'claude-haiku-4-5-20251001',
+    'gemini-3-pro-image-preview',
+    'gpt-image-1.5',
+  ],
+  // 自由板块-图片
+  freedom_image: [
+    'gemini-3-pro-image-preview',
+    'gpt-image-1.5',
+  ],
+  // 自由板块-视频（与视频生成保持一致）
+  freedom_video: [
+    'doubao-seedance-1-5-pro-251215',
+    'grok-video-3-10s',
+    'sora-2-all',
+    'veo3.1',
+    'veo3.1-fast',
+    'veo3.1-4k',
+    'wan2.6-i2v',
+  ],
+};
+
+/** 所有白名单模型的并集（用于 provider 卡片显示过滤后的模型数量） */
+export const ALL_WHITELISTED_MODELS: ReadonlySet<string> = new Set(
+  Object.values(FEATURE_ALLOWED_MODELS).flat()
+);
+
 function getOptionKey(option: ProviderOption): string {
   return `${option.providerId}:${option.model}`;
 }
@@ -144,6 +207,7 @@ const MODEL_CAPABILITIES: Record<string, ModelCapability[]> = {
   'gemini-3-flash-preview': ['text'],
   'gemini-3-pro-preview': ['text'],
   'claude-haiku-4-5-20251001': ['text', 'vision'],
+  'glm-5': ['text'],
 
   // ---- 图片生成模型 ----
   'cogview-3-plus': ['image_generation'],
@@ -246,7 +310,7 @@ export function FeatureBindingPanel() {
     toggleFeatureBinding,
     getFeatureBindings,
   } = useAPIConfigStore();
-  
+
   // 跟踪展开/折叠状态
   const [expandedFeatures, setExpandedFeatures] = useState<Set<AIFeature>>(new Set());
 
@@ -271,30 +335,40 @@ export function FeatureBindingPanel() {
 
     for (const feature of FEATURE_CONFIGS) {
       const opts: ProviderOption[] = [];
+      const allowedModels = FEATURE_ALLOWED_MODELS[feature.key];
 
       for (const provider of providers) {
-        const models = (provider.model || [])
-          .map((m) => m.trim())
-          .filter((m) => m.length > 0);
+        // 已同步的模型集合（用于判断可用性）
+        const syncedModelSet = new Set(
+          (provider.model || []).map((m) => m.trim()).filter((m) => m.length > 0)
+        );
 
-        for (const model of models) {
-          // 使用平台元数据 (model_type/tags) 进行精确分类
-          const mType = modelTypes[model];
-          const mTags = modelTags[model];
-          if (!modelSupportsCapability(model, provider, feature.requiredCapability, mType, mTags)) continue;
+        // 确定要展示的模型列表：有白名单用白名单，否则用已同步列表
+        const modelsToShow = allowedModels || Array.from(syncedModelSet);
+
+        for (const model of modelsToShow) {
+          // 白名单模型跳过能力检查（白名单本身即是声明）
+          // 非白名单模型（全量展示模式）仍按能力过滤
+          if (!allowedModels) {
+            const mType = modelTypes[model];
+            const mTags = modelTags[model];
+            if (!modelSupportsCapability(model, provider, feature.requiredCapability, mType, mTags)) continue;
+          }
+
           opts.push({
             providerId: provider.id,
             platform: provider.platform,
             name: provider.name,
             model,
+            available: syncedModelSet.has(model),
           });
         }
       }
 
-      // Prefer configured providers first for better UX.
+      // Prefer configured + available providers first for better UX.
       opts.sort((a, b) => {
-        const aConfigured = isProviderConfigured(a.providerId);
-        const bConfigured = isProviderConfigured(b.providerId);
+        const aConfigured = isProviderConfigured(a.providerId) && a.available;
+        const bConfigured = isProviderConfigured(b.providerId) && b.available;
         if (aConfigured !== bConfigured) return aConfigured ? -1 : 1;
         if (a.name !== b.name) return a.name.localeCompare(b.name);
         return a.model.localeCompare(b.model);
@@ -311,7 +385,7 @@ export function FeatureBindingPanel() {
     return FEATURE_CONFIGS.filter((feature) => {
       const bindings = getFeatureBindings(feature.key);
       if (bindings.length === 0) return false;
-      
+
       // 检查是否至少有一个有效的绑定
       const options = optionsByFeature[feature.key] || [];
       return bindings.some(binding => {
@@ -329,7 +403,7 @@ export function FeatureBindingPanel() {
     if (!parsed) return;
     toggleFeatureBinding(feature.key, optionKey);
   };
-  
+
   // 切换展开/折叠
   const toggleExpanded = (feature: AIFeature) => {
     setExpandedFeatures(prev => {
@@ -392,7 +466,7 @@ export function FeatureBindingPanel() {
           const currentBindings = getFeatureBindings(feature.key);
           const isExpanded = expandedFeatures.has(feature.key);
           const selectableOptionKeys = options
-            .filter((o) => isProviderConfigured(o.providerId))
+            .filter((o) => isProviderConfigured(o.providerId) && o.available)
             .map((o) => getOptionKey(o));
           const selectedSelectableCount = selectableOptionKeys.filter((k) => currentBindings.includes(k) || currentBindings.includes(`${options.find(o => getOptionKey(o) === k)?.platform}:${options.find(o => getOptionKey(o) === k)?.model}`)).length;
           const isAllSelected =
@@ -409,7 +483,7 @@ export function FeatureBindingPanel() {
             }
             setFeatureBindings(feature.key, null);
           };
-          
+
           // 检查有效/失效绑定（失效=模型被过滤、下线，或平台未配置）
           const validBindings: string[] = [];
           const invalidBindings: string[] = [];
@@ -439,7 +513,7 @@ export function FeatureBindingPanel() {
               )}
             >
               {/* Header - Click to expand */}
-              <div 
+              <div
                 className="flex items-center gap-4 p-4 cursor-pointer hover:bg-accent/50 transition-colors"
                 onClick={() => toggleExpanded(feature.key)}
               >
@@ -496,7 +570,7 @@ export function FeatureBindingPanel() {
                   )}
                 </div>
               </div>
-              
+
               {/* Expanded: Brand-categorized model selection */}
               {isExpanded && (
                 <div className="px-4 pb-4 pt-0 border-t border-border/50">
@@ -629,7 +703,7 @@ export function FeatureBindingPanel() {
                               ) : (
                                 filteredOptions.map((option) => {
                                   const optionKey = getOptionKey(option);
-                                  const optionConfigured = isProviderConfigured(option.providerId);
+                                  const optionConfigured = isProviderConfigured(option.providerId) && option.available;
                                   const legacyKey = `${option.platform}:${option.model}`;
                                   const isSelected = currentBindings.includes(optionKey) || currentBindings.includes(legacyKey);
                                   const brandId = extractBrandFromModel(option.model);

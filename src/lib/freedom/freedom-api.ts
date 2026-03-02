@@ -242,7 +242,7 @@ function detectFreedomImageRoute(model: string, endpointTypes?: string[]): Freed
   return baseRoute === 'openai_chat' ? 'openai_chat' : 'openai_images';
 }
 
-type FreedomVideoRoute = 'openai_official' | 'unified' | 'volc' | 'wan' | 'kling' | 'replicate';
+type FreedomVideoRoute = 'openai_official' | 'unified' | 'volc' | 'wan' | 'kling' | 'replicate' | 'grok' | 'sora';
 
 const FREEDOM_VIDEO_ROUTE_MAP: Record<string, FreedomVideoRoute> = {
   'openai-response': 'unified',
@@ -257,7 +257,8 @@ function inferFreedomVideoRouteFromEndpointType(endpointTypeRaw: string): Freedo
   const direct = FREEDOM_VIDEO_ROUTE_MAP[endpointType];
   if (direct) return direct;
 
-  if (endpointType.includes('sora') || endpointType.includes('/v1/videos')) return 'openai_official';
+  if (endpointType.includes('sora')) return 'sora';
+  if (endpointType.includes('/v1/videos')) return 'openai_official';
   if (endpointType.includes('openai') && endpointType.includes('video')) return 'openai_official';
 
   if (endpointType.includes('kling') || endpointType.includes('omni-video')) return 'kling';
@@ -282,7 +283,6 @@ function inferFreedomVideoRouteFromEndpointType(endpointTypeRaw: string): Freedo
   if (
     endpointType.includes('video/generations') ||
     endpointType.includes('/v1/video') ||
-    endpointType.includes('grok') ||
     endpointType.includes('luma') ||
     endpointType.includes('runway') ||
     endpointType.includes('vidu')
@@ -290,23 +290,36 @@ function inferFreedomVideoRouteFromEndpointType(endpointTypeRaw: string): Freedo
     return 'unified';
   }
 
+  if (endpointType.includes('grok')) {
+    return 'grok';
+  }
+
   return null;
 }
 
 function detectFreedomVideoRoute(model: string, endpointTypes?: string[]): FreedomVideoRoute {
+  const m = model.toLowerCase();
+
+  // Sora-2, Grok, and Wan models must take priority over metadata-driven routing
+  // because endpoint type labels like 'openAI官方视频格式' would incorrectly
+  // match openai_official (FormData), when these models need their specific JSON format
+  if (m.includes('sora-2') || m.includes('sora-all')) return 'sora';
+  if (m.includes('grok-video') || m.includes('grok-3-video')) return 'grok';
+  if (m.includes('wan')) return 'wan';
+
   if (endpointTypes && endpointTypes.length > 0) {
     const formats = endpointTypes
       .map(t => inferFreedomVideoRouteFromEndpointType(t))
       .filter((f): f is FreedomVideoRoute => f !== null);
 
-    const priority: FreedomVideoRoute[] = ['openai_official', 'kling', 'volc', 'wan', 'replicate', 'unified'];
+    const priority: FreedomVideoRoute[] = ['openai_official', 'kling', 'volc', 'wan', 'replicate', 'grok', 'sora', 'unified'];
     for (const format of priority) {
       if (formats.includes(format)) return format;
     }
   }
 
-  const m = model.toLowerCase();
-  if (m.includes('sora-2') || m.includes('openai')) return 'openai_official';
+  // Fallback: model name matching (grok/sora already handled above)
+  if (m.includes('openai')) return 'openai_official';
   if (m.includes('kling')) return 'kling';
   if (m.includes('seedance') || m.includes('doubao')) return 'volc';
   if (m.includes('wan')) return 'wan';
@@ -406,7 +419,7 @@ async function generateViaChatCompletions(
   if (!response.ok) {
     const errorText = await response.text();
     let msg = `图片生成 API 错误: ${response.status}`;
-    try { const j = JSON.parse(errorText); msg = j.error?.message || msg; } catch {}
+    try { const j = JSON.parse(errorText); msg = j.error?.message || msg; } catch { }
     throw new Error(msg);
   }
 
@@ -878,6 +891,12 @@ async function _generateFreedomVideoInner(
     case 'replicate':
       result = await generateVideoViaReplicate(params, model, apiKey, baseUrl);
       break;
+    case 'grok':
+      result = await generateVideoViaGrok(params, model, apiKey, baseUrl);
+      break;
+    case 'sora':
+      result = await generateVideoViaSora(params, model, apiKey, baseUrl);
+      break;
     default:
       result = await generateVideoViaUnified(params, model, apiKey, baseUrl);
       break;
@@ -888,15 +907,179 @@ async function _generateFreedomVideoInner(
 }
 
 /**
+ * Convert aspect ratio to Grok-supported format (2:3, 3:2, 1:1)
+ */
+function toGrokAspectRatio(aspectRatio: string): string {
+  if (aspectRatio === '9:16' || aspectRatio === '3:4') return '2:3';
+  if (aspectRatio === '1:1') return '1:1';
+  return '3:2';
+}
+
+/**
+ * Generate video via Grok (361API) video API
+ * Submit: POST /v1/video/create  (JSON: model, prompt, aspect_ratio, size, images)
+ * Poll:   GET  /v1/video/query?id={taskId}
+ */
+async function generateVideoViaGrok(
+  params: FreedomVideoParams,
+  model: string,
+  apiKey: string,
+  baseUrl: string,
+): Promise<GenerationResult> {
+  const grouped = groupVideoUploadFiles(params.uploadFiles);
+  const images: string[] = [];
+  const firstFrame = grouped.single || grouped.first;
+  if (firstFrame) images.push(await toUploadHttpUrl(firstFrame));
+
+  const body = {
+    model,
+    prompt: params.prompt,
+    aspect_ratio: toGrokAspectRatio(params.aspectRatio || '16:9'),
+    size: '720P',
+    images,
+  };
+
+  const submitResp = await fetch(buildEndpoint(baseUrl, 'video/create'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!submitResp.ok) {
+    throw toHttpError('Grok video submit failed', submitResp.status, await submitResp.text());
+  }
+
+  const submitData = await submitResp.json();
+  const taskId = String(submitData.id || submitData.task_id || '');
+  const directUrl = extractVideoUrl(submitData);
+  if (directUrl) return { url: directUrl, taskId: taskId || undefined };
+  if (!taskId) throw new Error('Grok 视频返回空任务 ID');
+
+  for (let i = 0; i < VIDEO_POLL_MAX_ATTEMPTS; i++) {
+    await new Promise((r) => setTimeout(r, VIDEO_POLL_INTERVAL));
+    const queryUrl = `${buildEndpoint(baseUrl, 'video/query')}?id=${taskId}`;
+    const pollResp = await fetch(queryUrl, {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    });
+    if (!pollResp.ok) continue;
+    const pollData = await pollResp.json();
+    const status = getVideoTaskStatus(pollData);
+    if (status === 'completed' || status === 'succeeded' || status === 'success') {
+      let videoUrl = extractVideoUrl(pollData);
+      if (!videoUrl) {
+        videoUrl = await refetchVideoUrlAfterCompletion(async () => {
+          const followResp = await fetch(queryUrl, {
+            headers: { 'Authorization': `Bearer ${apiKey}` },
+          });
+          if (!followResp.ok) return null;
+          return followResp.json();
+        });
+      }
+      if (videoUrl) return { url: videoUrl, taskId };
+      continue;
+    }
+    if (status === 'failed' || status === 'error' || status === 'cancelled') {
+      throw new Error(getVideoTaskErrorMessage(pollData, 'Grok 视频生成失败'));
+    }
+  }
+
+  throw new Error('Grok 视频生成超时');
+}
+
+/**
+ * Generate video via Sora-2 (361API unified format)
+ * Submit: POST /v1/video/create (JSON: model, prompt, images, orientation, size, duration, watermark)
+ * Poll:   GET  /v1/video/query?id={taskId}
+ */
+async function generateVideoViaSora(
+  params: FreedomVideoParams,
+  model: string,
+  apiKey: string,
+  baseUrl: string,
+): Promise<GenerationResult> {
+  const grouped = groupVideoUploadFiles(params.uploadFiles);
+  const images: string[] = [];
+  const firstFrame = grouped.single || grouped.first;
+  if (firstFrame) images.push(await toUploadHttpUrl(firstFrame));
+
+  const isPortrait = params.aspectRatio === '9:16' || params.aspectRatio === '3:4';
+  const is1080 = (params.resolution || '').toLowerCase().includes('1080');
+
+  const body = {
+    model,
+    prompt: params.prompt,
+    images,
+    orientation: isPortrait ? 'portrait' : 'landscape',
+    size: is1080 ? 'large' : 'small',
+    duration: params.duration || 10,
+    watermark: false,
+  };
+
+  const submitResp = await fetch(buildEndpoint(baseUrl, 'video/create'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!submitResp.ok) {
+    throw toHttpError('Sora video submit failed', submitResp.status, await submitResp.text());
+  }
+
+  const submitData = await submitResp.json();
+  const taskId = String(submitData.id || submitData.task_id || '');
+  const directUrl = extractVideoUrl(submitData);
+  if (directUrl) return { url: directUrl, taskId: taskId || undefined };
+  if (!taskId) throw new Error('Sora 视频返回空任务 ID');
+
+  for (let i = 0; i < VIDEO_POLL_MAX_ATTEMPTS; i++) {
+    await new Promise((r) => setTimeout(r, VIDEO_POLL_INTERVAL));
+    const queryUrl = `${buildEndpoint(baseUrl, 'video/query')}?id=${taskId}`;
+    const pollResp = await fetch(queryUrl, {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    });
+    if (!pollResp.ok) continue;
+    const pollData = await pollResp.json();
+    const status = getVideoTaskStatus(pollData);
+    if (status === 'completed' || status === 'succeeded' || status === 'success') {
+      let videoUrl = extractVideoUrl(pollData);
+      if (!videoUrl) {
+        videoUrl = await refetchVideoUrlAfterCompletion(async () => {
+          const followResp = await fetch(queryUrl, {
+            headers: { 'Authorization': `Bearer ${apiKey}` },
+          });
+          if (!followResp.ok) return null;
+          return followResp.json();
+        });
+      }
+      if (videoUrl) return { url: videoUrl, taskId };
+      continue;
+    }
+    if (status === 'failed' || status === 'error' || status === 'cancelled') {
+      throw new Error(getVideoTaskErrorMessage(pollData, 'Sora 视频生成失败'));
+    }
+  }
+
+  throw new Error('Sora 视频生成超时');
+}
+
+/**
  * Convert aspect ratio string to Runway pixel-format ratio (e.g. '16:9' → '1280:720')
  */
 function toRunwayRatio(aspectRatio: string): string {
   const map: Record<string, string> = {
     '16:9': '1280:720',
     '9:16': '720:1280',
-    '1:1':  '720:720',
-    '4:3':  '960:720',
-    '3:4':  '720:960',
+    '1:1': '720:720',
+    '4:3': '960:720',
+    '3:4': '720:960',
     '21:9': '2048:880',
   };
   return map[aspectRatio] ?? aspectRatio;
@@ -1336,9 +1519,18 @@ async function generateVideoViaWan(
   baseUrl: string,
 ): Promise<GenerationResult> {
   const rootBase = getRootBaseUrl(baseUrl);
+
+  // Extract first frame from upload files for image-to-video
+  const grouped = groupVideoUploadFiles(params.uploadFiles);
+  const firstFrame = grouped.single || grouped.first;
+  const imgUrl = firstFrame ? await toUploadHttpUrl(firstFrame) : undefined;
+
   const body: Record<string, any> = {
     model,
-    input: { prompt: params.prompt },
+    input: {
+      prompt: params.prompt,
+      ...(imgUrl ? { img_url: imgUrl } : {}),
+    },
     parameters: {
       resolution: (params.resolution || '720P').toUpperCase(),
       prompt_extend: true,
@@ -1348,7 +1540,7 @@ async function generateVideoViaWan(
   if (params.duration) body.parameters.duration = Math.max(3, Math.min(10, params.duration));
 
   const submitResp = await fetch(
-    `${rootBase}/ali/bailian/api/v1/services/aigc/video-generation/video-synthesis`,
+    `${rootBase}/alibailian/api/v1/services/aigc/video-generation/video-synthesis`,
     {
       method: 'POST',
       headers: {
@@ -1584,11 +1776,11 @@ function extractVideoUrl(data: any): string | null {
 function getVideoTaskStatus(data: any): string {
   return String(
     data?.status ??
-      data?.detail?.status ??
-      data?.state ??
-      data?.detail?.state ??
-      data?.data?.status ??
-      '',
+    data?.detail?.status ??
+    data?.state ??
+    data?.detail?.state ??
+    data?.data?.status ??
+    '',
   ).toLowerCase();
 }
 
@@ -1686,7 +1878,7 @@ function saveToMediaLibrary(
     const projectId = useProjectStore.getState().activeProjectId;
     const name = prompt.slice(0, 30).replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_') || 'freedom';
     const type = source === 'ai-image' ? 'image' : 'video';
-    
+
     const mediaId = mediaStore.addMediaFromUrl({
       url,
       name: `${name}_${Date.now()}`,

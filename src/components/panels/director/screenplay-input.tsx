@@ -51,6 +51,7 @@ import {
 import { uploadMultipleImages } from "@/lib/utils/image-upload";
 import { VISUAL_STYLE_PRESETS, getStyleTokens, getStylesByCategory, type VisualStyleId } from "@/lib/constants/visual-styles";
 import { StylePicker } from "@/components/ui/style-picker";
+import { LocalImage } from "@/components/ui/local-image";
 
 const EXAMPLE_PROMPTS = [
   "一只可爱的小猫在草地上玩耍，追逐蝴蝶",
@@ -568,8 +569,8 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={`min-h-[60px] border-2 border-dashed rounded-lg p-2 transition-colors ${isDragOver
-              ? "border-primary bg-primary/10"
-              : "border-muted-foreground/20 hover:border-muted-foreground/40"
+            ? "border-primary bg-primary/10"
+            : "border-muted-foreground/20 hover:border-muted-foreground/40"
             }`}
         >
           {selectedCharacters.length === 0 ? (
@@ -608,7 +609,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
                           className="w-full flex items-center gap-2 p-2 hover:bg-muted transition-colors text-left"
                         >
                           {thumbnail ? (
-                            <img
+                            <LocalImage
                               src={thumbnail}
                               alt={char.name}
                               className="w-8 h-8 rounded-full object-cover"
@@ -637,7 +638,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
                   className="flex items-center gap-2 bg-muted rounded-full pl-1 pr-2 py-1"
                 >
                   {char.thumbnailUrl ? (
-                    <img
+                    <LocalImage
                       src={char.thumbnailUrl}
                       alt={char.characterName}
                       className="w-6 h-6 rounded-full object-cover"
@@ -692,7 +693,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
                             className="w-full flex items-center gap-2 p-2 hover:bg-muted transition-colors text-left"
                           >
                             {thumbnail ? (
-                              <img
+                              <LocalImage
                                 src={thumbnail}
                                 alt={char.name}
                                 className="w-8 h-8 rounded-full object-cover"

@@ -18,6 +18,7 @@ import { useSceneStore } from "@/stores/scene-store";
 import { useMediaStore } from "@/stores/media-store";
 import { getApiKeyCount, parseApiKeys, maskApiKey } from "@/lib/api-key-manager";
 import { EditProviderDialog, FeatureBindingPanel } from "@/components/api-manager";
+import { ALL_WHITELISTED_MODELS } from "@/components/api-manager/FeatureBindingPanel";
 import { AddImageHostDialog } from "@/components/image-host-manager/AddImageHostDialog";
 import { EditImageHostDialog } from "@/components/image-host-manager/EditImageHostDialog";
 import { Button } from "@/components/ui/button";
@@ -655,7 +656,7 @@ export function SettingsPanel() {
                                         toggleExpanded(provider.id);
                                       }}
                                     >
-                                      模型 ({provider.model.length})
+                                      模型 ({provider.model.filter(m => ALL_WHITELISTED_MODELS.has(m)).length})
                                     </span>
                                     <span>|</span>
                                     <span
@@ -683,7 +684,12 @@ export function SettingsPanel() {
                                         const result = await syncProviderModels(provider.id);
                                         setSyncingProvider(null);
                                         if (result.success) {
-                                          toast.success(`已同步 ${result.count} 个模型`);
+                                          // 显示白名单过滤后的可用模型数
+                                          const updated = useAPIConfigStore.getState().providers.find(p => p.id === provider.id);
+                                          const whitelistedCount = updated
+                                            ? updated.model.filter(m => ALL_WHITELISTED_MODELS.has(m)).length
+                                            : 0;
+                                          toast.success(`已同步，${whitelistedCount} 个可用模型`);
                                         } else {
                                           toast.error(result.error || '同步失败');
                                         }
@@ -768,9 +774,9 @@ export function SettingsPanel() {
                                 )}
 
                                 {/* Models */}
-                                {provider.model.length > 0 && (
+                                {provider.model.filter(m => ALL_WHITELISTED_MODELS.has(m)).length > 0 && (
                                   <div className="flex flex-wrap gap-2">
-                                    {provider.model.map((m) => (
+                                    {provider.model.filter(m => ALL_WHITELISTED_MODELS.has(m)).map((m) => (
                                       <span
                                         key={m}
                                         className="text-xs px-2 py-1 bg-muted rounded font-mono"
