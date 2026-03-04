@@ -12,7 +12,7 @@ export function Header() {
         { label: '功能特性', href: '#features' },
         { label: '作品案例', href: '#works' },
         { label: '定价方案', href: 'https://361api.com/pricing' },
-        { label: '帮助中心', href: '#help' }
+        { label: '帮助中心', href: 'https://dcn2kzs1g73g.feishu.cn/wiki/JEy5w2r5ZiY341kv55rclyd2n0O?from=from_copylink' }
     ];
 
     return (

@@ -17,6 +17,7 @@ import type { SplitScene } from '@/stores/director-store';
 import type { Character } from '@/stores/character-library-store';
 import type { Scene } from '@/stores/scene-store';
 import type { ShotGroup, AssetRef, AssetPurpose, SClassAspectRatio, SClassResolution, SClassDuration, EditType } from '@/stores/sclass-store';
+import { resolveIdbImageUrl } from '@/lib/image-storage';
 
 // ==================== Types ====================
 
@@ -133,14 +134,23 @@ export async function mergeToGridImage(
   const totalHeight = cellHeight * rows;
 
   // 加载所有图片
-  const loadImage = (src: string): Promise<HTMLImageElement> =>
-    new Promise((resolve, reject) => {
+  const loadImage = async (src: string): Promise<HTMLImageElement> => {
+    // Resolve idb-image:// URLs to blob: URLs before loading
+    let resolvedSrc = src;
+    if (src.startsWith('idb-image://')) {
+      const blobUrl = await resolveIdbImageUrl(src);
+      if (!blobUrl) throw new Error(`无法从 IndexedDB 解析图片: ${src.substring(0, 60)}...`);
+      resolvedSrc = blobUrl;
+    }
+
+    return new Promise((resolve, reject) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => resolve(img);
       img.onerror = () => reject(new Error(`加载图片失败: ${src.substring(0, 60)}...`));
-      img.src = src;
+      img.src = resolvedSrc;
     });
+  };
 
   const images = await Promise.all(imageUrls.map(loadImage));
 
