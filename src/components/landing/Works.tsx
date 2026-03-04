@@ -1,7 +1,9 @@
 import { Play, Eye, Heart } from 'lucide-react';
 import { ImageWithFallback } from './ImageWithFallback';
+import { useNavigate } from 'react-router-dom';
 
 export function Works() {
+    const navigate = useNavigate();
     const works = [
         {
             id: 1,
@@ -51,6 +53,7 @@ export function Works() {
                     {works.map((work, index) => (
                         <div
                             key={work.id}
+                            onClick={() => navigate('/home')}
                             className="group relative cursor-pointer landing-fade-in hover:-translate-y-2 transition-all duration-300"
                             style={{ animationDelay: `${index * 100}ms` }}
                         >
@@ -105,12 +108,7 @@ export function Works() {
                     ))}
                 </div>
 
-                {/* View more button */}
-                <div className="text-center mt-16 landing-fade-in" style={{ animationDelay: '400ms' }}>
-                    <button className="px-8 py-4 bg-slate-900 border border-indigo-500/50 text-white rounded-full transition-all hover:bg-slate-800 hover:shadow-[0_0_20px_rgba(124,58,237,0.3)] hover:border-cyan-500/50 font-medium cursor-pointer">
-                        查看更多作品
-                    </button>
-                </div>
+
             </div>
         </section>
     );

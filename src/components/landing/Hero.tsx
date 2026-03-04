@@ -49,7 +49,7 @@ export function Hero() {
                         全流程批量化智能生产，开启漫剧创作新纪元
                     </p>
 
-                    <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+                    <div className="flex justify-center">
                         <Button
                             size="lg"
                             className="bg-gradient-to-r from-violet-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white px-8 py-6 text-lg group cursor-pointer border-0 shadow-[0_0_25px_rgba(124,58,237,0.4)] hover:shadow-[0_0_35px_rgba(6,182,212,0.6)] transition-all"
@@ -57,9 +57,6 @@ export function Hero() {
                         >
                             立即开始创作
                             <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                        </Button>
-                        <Button size="lg" variant="outline" className="bg-slate-900/50 backdrop-blur-md border-indigo-500/30 text-slate-200 hover:bg-indigo-500/20 hover:text-white px-8 py-6 text-lg cursor-pointer">
-                            观看演示
                         </Button>
                     </div>
                 </div>

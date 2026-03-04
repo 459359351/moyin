@@ -11,7 +11,7 @@ export function Header() {
         { label: '首页', href: '#home' },
         { label: '功能特性', href: '#features' },
         { label: '作品案例', href: '#works' },
-        { label: '定价方案', href: '#pricing' },
+        { label: '定价方案', href: 'https://361api.com/pricing' },
         { label: '帮助中心', href: '#help' }
     ];
 
@@ -33,6 +33,7 @@ export function Header() {
                             <a
                                 key={item.href}
                                 href={item.href}
+                                {...(item.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
                                 className="text-slate-300 hover:text-cyan-400 transition-colors font-medium cursor-pointer animate-[fadeInDown_0.5s_ease-out] opacity-0 [animation-fill-mode:forwards]"
                                 style={{ animationDelay: `${index * 100}ms` }}
                             >
@@ -43,9 +44,7 @@ export function Header() {
 
                     {/* CTA Buttons */}
                     <div className="hidden md:flex items-center gap-4">
-                        <Button variant="ghost" className="text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer">
-                            登录
-                        </Button>
+
                         <Button
                             className="bg-gradient-to-r from-violet-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white shadow-[0_0_20px_rgba(6,182,212,0.3)] hover:shadow-[0_0_25px_rgba(6,182,212,0.5)] transition-all cursor-pointer border-0"
                             onClick={() => navigate('/home')}
@@ -77,9 +76,7 @@ export function Header() {
                             </a>
                         ))}
                         <div className="flex flex-col gap-2 mt-4">
-                            <Button variant="outline" className="w-full border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer">
-                                登录
-                            </Button>
+
                             <Button
                                 className="w-full bg-gradient-to-r from-violet-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)] border-0 cursor-pointer"
                                 onClick={() => navigate('/home')}
