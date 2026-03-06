@@ -2,7 +2,7 @@
 
 ## 双重许可模式 | Dual Licensing
 
-**魔因漫创 (Moyin Creator)** 采用双重许可模式发布：
+**魔片漫创 (Moyin Creator)** 采用双重许可模式发布：
 
 ### 1. 社区版 — AGPL-3.0
 

@@ -143,8 +143,6 @@ const FEATURE_ALLOWED_MODELS: Partial<Record<AIFeature, string[]>> = {
   // 图片理解
   image_understanding: [
     'claude-haiku-4-5-20251001',
-    'gemini-3-pro-image-preview',
-    'gpt-image-1.5',
   ],
   // 自由板块-图片
   freedom_image: [
@@ -502,6 +500,17 @@ export function FeatureBindingPanel() {
           }
           const configured = validBindings.length > 0;
 
+          // 计算白名单中有多少模型不可用（没有任何已配置供应商同步过该模型）
+          const allowedModels = FEATURE_ALLOWED_MODELS[feature.key];
+          const availableModelSet = new Set(
+            options
+              .filter((o) => isProviderConfigured(o.providerId) && o.available)
+              .map((o) => o.model)
+          );
+          const unavailableWhitelistCount = allowedModels
+            ? allowedModels.filter((m) => !availableModelSet.has(m)).length
+            : 0;
+
           return (
             <div
               key={feature.key}
@@ -544,14 +553,12 @@ export function FeatureBindingPanel() {
                           {validBindings.length} 个模型
                         </span>
                       )}
-                      {isFreedomFeature && (
-                        <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded">
-                          可用 {selectableOptionKeys.length}
-                        </span>
-                      )}
-                      {isFreedomFeature && invalidBindings.length > 0 && (
+                      <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded">
+                        可用 {selectableOptionKeys.length}
+                      </span>
+                      {unavailableWhitelistCount > 0 && (
                         <span className="text-xs bg-amber-500/15 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded">
-                          暂不可用 {invalidBindings.length}
+                          暂不可用 {unavailableWhitelistCount}
                         </span>
                       )}
                     </div>
@@ -592,7 +599,7 @@ export function FeatureBindingPanel() {
                           </span>
                         </div>
                       )}
-                      {isFreedomFeature && invalidBindings.length > 0 && (
+                      {unavailableWhitelistCount > 0 && (
                         <p className="text-[11px] text-amber-700 dark:text-amber-300">
                           检测到暂不可用绑定：系统不会自动清理，模型恢复后会自动继续可用。
                         </p>

@@ -32,7 +32,7 @@ import type { IProvider } from "@/lib/api-key-manager";
 
 /**
  * 平台预设配置
- * 1. 魔因API (memefast) - 全功能中转（推荐）
+ * 1. 魔片API (memefast) - 全功能中转（推荐）
  * 2. RunningHub - 视角切换/多角度生成
  * 3. 自定义 - OpenAI 兼容 API
  */
@@ -47,7 +47,7 @@ const PLATFORM_PRESETS: Array<{
 }> = [
   {
     platform: "memefast",
-    name: "魔因API",
+    name: "魔片API",
     baseUrl: "https://memefast.top",
     description: "543+ 模型中转，支持 GPT/Claude/Gemini/DeepSeek/Veo/Sora 等",
     services: ["对话", "图片生成", "视频生成", "图片理解"],

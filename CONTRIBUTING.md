@@ -1,6 +1,6 @@
 # 贡献指南 | Contributing Guide
 
-感谢你对 **魔因漫创 (Moyin Creator)** 的关注！欢迎任何形式的贡献。
+感谢你对 **魔片漫创 (Moyin Creator)** 的关注！欢迎任何形式的贡献。
 
 ## 开发环境
 

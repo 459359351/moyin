@@ -2,7 +2,7 @@
 // Licensed under AGPL-3.0-or-later. See LICENSE for details.
 // Commercial licensing available. See COMMERCIAL_LICENSE.md.
 import { useEffect, useRef, useState } from "react";
-import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { HashRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { LandingPage } from "@/components/landing/LandingPage";
 import { Toaster } from "@/components/ui/sonner";
@@ -139,7 +139,7 @@ function RouteStateSync() {
 
 function AppContent() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <RouteStateSync />
       <Routes>
         <Route path="/" element={
@@ -154,7 +154,7 @@ function AppContent() {
           </div>
         } />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 

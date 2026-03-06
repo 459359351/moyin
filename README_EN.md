@@ -2,7 +2,7 @@
   <img src="build/icon.png" width="120" alt="Moyin Creator Logo" />
 </p>
 
-<h1 align="center">Moyin Creator 魔因漫创</h1>
+<h1 align="center">Moyin Creator 魔片漫创</h1>
 
 <p align="center">
   <strong>🎬 AI-Powered Film & Anime Production Tool · Seedance 2.0 · Script-to-Film Batch Pipeline</strong>

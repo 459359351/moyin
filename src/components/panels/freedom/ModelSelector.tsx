@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { AlertTriangle, Check, ChevronsUpDown, Search, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -388,21 +388,18 @@ export function ModelSelector({ type, value, onChange, className }: ModelSelecto
       const idx = binding.indexOf(':');
       if (idx <= 0) continue;
       const model = binding.slice(idx + 1);
-      if (!model) continue;
+      if (!model || seen.has(model)) continue;
 
-      const expandedModels = expandBoundModel(type, model);
-      for (const expandedModel of expandedModels) {
-        if (!isModelAllowedByPanelType(type, expandedModel, modelTypes, modelEndpointTypes)) continue;
-        if (shouldHideModel(type, expandedModel)) continue;
-        if (!expandedModel || seen.has(expandedModel)) continue;
-        seen.add(expandedModel);
+      // 直接使用绑定的模型，不做家族展开，确保只显示白名单中的模型
+      if (!isModelAllowedByPanelType(type, model, modelTypes, modelEndpointTypes)) continue;
+      if (shouldHideModel(type, model)) continue;
+      seen.add(model);
 
-        result.push({
-          id: expandedModel,
-          name: getModelDisplayName(expandedModel),
-          brandId: extractBrandFromModel(expandedModel),
-        });
-      }
+      result.push({
+        id: model,
+        name: getModelDisplayName(model),
+        brandId: extractBrandFromModel(model),
+      });
     }
 
     return result;
@@ -440,6 +437,13 @@ export function ModelSelector({ type, value, onChange, className }: ModelSelecto
 
   const selectedModel = models.find((m) => m.id === value);
   const showUnavailableWarning = Boolean(value) && !selectedModel;
+
+  // 当前选中的模型不在可用列表中时，自动切换到第一个可用模型
+  useEffect(() => {
+    if (models.length > 0 && !models.find((m) => m.id === value)) {
+      onChange(models[0].id);
+    }
+  }, [models, value, onChange]);
 
   return (
     <div className="space-y-1.5">

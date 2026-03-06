@@ -10,20 +10,34 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ChevronLeft, LayoutDashboard, Settings, Sun, Moon, HelpCircle } from "lucide-react";
+import { ChevronLeft, LayoutDashboard, Settings, Sun, Moon, HelpCircle, Home } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 export function TabBar() {
   const { activeTab, inProject, setActiveTab, setInProject } = useMediaPanelStore();
   const { theme, toggleTheme } = useThemeStore();
+  const navigate = useNavigate();
+
+  const goToLandingPage = () => navigate('/');
 
   // Dashboard mode
   if (!inProject) {
     return (
       <div className="flex flex-col w-14 bg-panel border-r border-border py-2">
         <div className="p-2">
-          <div className="w-8 h-8 bg-primary text-primary-foreground flex items-center justify-center mx-auto rounded">
-            <span className="text-sm font-bold">M</span>
-          </div>
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={goToLandingPage}
+                  className="w-8 h-8 bg-primary text-primary-foreground flex items-center justify-center mx-auto rounded hover:opacity-80 transition-opacity cursor-pointer"
+                >
+                  <span className="text-sm font-bold">M</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">返回官网主页</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
         {/* Dashboard nav */}
         <nav className="flex-1 py-1">
@@ -47,8 +61,22 @@ export function TabBar() {
             </Tooltip>
           </TooltipProvider>
         </nav>
-        {/* Bottom: Help + Settings + Theme */}
+        {/* Bottom: Home + Help + Settings + Theme */}
         <div className="mt-auto border-t border-border py-1">
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={goToLandingPage}
+                  className="w-full flex flex-col items-center py-2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                >
+                  <Home className="h-4 w-4" />
+                  <span className="text-[8px]">主页</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">返回官网主页</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <TooltipProvider delayDuration={300}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -100,7 +128,7 @@ export function TabBar() {
             </Tooltip>
           </TooltipProvider>
         </div>
-      </div>
+      </div >
     );
   }
 
@@ -109,9 +137,19 @@ export function TabBar() {
     <div className="flex flex-col w-14 bg-panel border-r border-border">
       {/* Logo + Back */}
       <div className="p-2 border-b border-border">
-        <div className="w-8 h-8 bg-primary text-primary-foreground flex items-center justify-center mx-auto rounded mb-1">
-          <span className="text-sm font-bold">M</span>
-        </div>
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={goToLandingPage}
+                className="w-8 h-8 bg-primary text-primary-foreground flex items-center justify-center mx-auto rounded mb-1 hover:opacity-80 transition-opacity cursor-pointer"
+              >
+                <span className="text-sm font-bold">M</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">返回官网主页</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <TooltipProvider delayDuration={300}>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -132,7 +170,7 @@ export function TabBar() {
         {mainNavItems.map((item) => {
           const isActive = activeTab === item.id;
           const Icon = item.icon;
-          
+
           return (
             <TooltipProvider key={item.id} delayDuration={300}>
               <Tooltip>
@@ -159,8 +197,22 @@ export function TabBar() {
         })}
       </nav>
 
-      {/* Bottom: Help + Settings + Theme */}
+      {/* Bottom: Home + Help + Settings + Theme */}
       <div className="mt-auto border-t border-border py-1">
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={goToLandingPage}
+                className="w-full flex flex-col items-center py-2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                <Home className="h-4 w-4" />
+                <span className="text-[8px]">主页</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">返回官网主页</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <TooltipProvider delayDuration={300}>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -180,7 +232,7 @@ export function TabBar() {
         {bottomNavItems.map((item) => {
           const isActive = activeTab === item.id;
           const Icon = item.icon;
-          
+
           return (
             <TooltipProvider key={item.id} delayDuration={300}>
               <Tooltip>
